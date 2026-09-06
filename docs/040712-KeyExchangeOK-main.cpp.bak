@@ -1,0 +1,653 @@
+#include <Arduino.h>
+#include <WiFi.h>
+#include <AsyncTCP.h>
+#include <ESPAsyncWebServer.h>
+#include <ESPAsyncHTTPUpdateServer.h>
+#include <ArduinoJson.h>
+
+#include "mbedtls/ecdh.h"
+#include "mbedtls/ecp.h"
+#include "mbedtls/entropy.h"
+#include "mbedtls/md.h"
+#include "mbedtls/base64.h"
+
+// #include <WebServer.h>
+// #include <HTTPUpdateServer.h>
+#include <Wire.h>
+// #include <I2S.h>
+#include <tas5805m.hpp>
+// #include <Audio.h>
+// #include <AudioTools.h>
+// #include <BluetoothA2DPSink.h>
+#include <btAudio.h>
+// #include <NeoPixelBus.h>
+#include <FastLED.h>
+#include <mbedtls/ctr_drbg.h>
+
+// LED Strip pins
+#define PIN_LED_1 33
+#define PIN_LED_2 32
+#define NUM_LEDS 30
+
+// I2C pins
+#define PIN_I2C_SDA 21
+#define PIN_I2C_SCL 22
+
+// Shift register pins
+#define PIN_SR_LATCH 4
+#define PIN_SR_CLOCK 18
+#define PIN_SR_DATA 23
+
+// I2S pins for TAS5805M
+#define PIN_I2S_SCK 5    // BCLK
+#define PIN_I2S_WS 25    // LRCK
+#define PIN_I2S_SDOUT 26 // DIN to TAS5805M
+#define PIN_I2S_SDIN 35  // Not used
+#define PIN_I2S_FAULT 34 // Optional: fault monitor
+#define PIN_I2S_PDN 27   // Power-down control
+
+// ---------- Config ----------
+const char *WIFI_SSID = "YOUR_SSID";
+const char *WIFI_PASS = "YOUR_PASSWORD";
+const uint16_t WS_PORT = 80;
+const char *WS_PATH = "/ws";
+// After HMAC verify OK, set authenticated true
+bool g_authenticated = true;
+
+AsyncWebServer server(WS_PORT);
+ESPAsyncHTTPUpdateServer updateServer;
+AsyncWebSocket ws(WS_PATH);
+
+tas5805m amp(&Wire);
+// Audio audio;
+btAudio bta = btAudio("mYSpeaker");
+// I2SStream i2s;
+// BluetoothA2DPSink a2dp(I2S);
+CRGB leds[NUM_LEDS];
+
+bool ledState = 0;
+
+// Visualization state
+static int32_t dynamicMax = 0; // Initial guess
+static uint32_t lastUpdate = 0;
+// static uint8_t smoothedLevel = 0;
+
+void visualizeAudio(const uint8_t *data, uint32_t len)
+{
+    // 2. Visualize audio
+    int16_t *samples = (int16_t *)data;
+    int peak = 0;
+    for (uint32_t i = 0; i < len / 2; i++)
+    {
+        int16_t val = abs(samples[i]);
+        if (val > peak)
+            peak = val;
+    }
+    if (peak > dynamicMax)
+        dynamicMax = peak; // Expand range if needed
+
+    // Decay over time to adapt to quieter music
+    if (millis() - lastUpdate > 50)
+    {
+        dynamicMax = max(peak, dynamicMax - 5); // Decay slowly
+        lastUpdate = millis();
+    }
+    uint8_t level = map(peak, 0, 32767, 0, NUM_LEDS);
+    for (int i = 0; i < NUM_LEDS; i++)
+    {
+        leds[i] = CHSV(160 - i * 10, 255, (i < level) ? 255 : 0);
+    }
+    FastLED.show();
+}
+void bt_data_cb(const uint8_t *data, uint32_t len)
+{
+    // Send audio to I2S
+    size_t written;
+    i2s_write(I2S_NUM_0, data, len, &written, portMAX_DELAY);
+
+    // Visualize audio
+    visualizeAudio(data, len);
+}
+void set_on()
+{
+    // ground latchPin and hold low for as long as you are transmitting
+    digitalWrite(PIN_SR_LATCH, LOW);
+    shiftOut(PIN_SR_DATA, PIN_SR_CLOCK, LSBFIRST, 0xff);
+    shiftOut(PIN_SR_DATA, PIN_SR_CLOCK, LSBFIRST, 0xff);
+    // return the latch pin high to signal chip that it
+    // no longer needs to listen for information
+    digitalWrite(PIN_SR_LATCH, HIGH);
+}
+void set_off()
+{
+    // ground latchPin and hold low for as long as you are transmitting
+    digitalWrite(PIN_SR_LATCH, LOW);
+    shiftOut(PIN_SR_DATA, PIN_SR_CLOCK, LSBFIRST, 0);
+    shiftOut(PIN_SR_DATA, PIN_SR_CLOCK, LSBFIRST, 0);
+    // return the latch pin high to signal chip that it
+    // no longer needs to listen for information
+    digitalWrite(PIN_SR_LATCH, HIGH);
+}
+void notifyClients()
+{
+    ws.textAll(String(ledState));
+}
+
+// ---------- Crypto contexts ----------
+mbedtls_entropy_context entropy;
+mbedtls_ctr_drbg_context ctr_drbg;
+mbedtls_ecdh_context ecdh_ctx;
+
+// ---------- State ----------
+std::vector<uint8_t> g_hmac_key; // 32 bytes after HKDF
+bool g_hmac_ready = false;
+
+// ---------- Utilities ----------
+void printHex(const char *label, const uint8_t *buf, size_t len)
+{
+    Serial.print(label);
+    for (size_t i = 0; i < len; i++)
+        Serial.printf("%02X", buf[i]);
+    Serial.println();
+}
+
+String base64Encode(const uint8_t *data, size_t len)
+{
+    size_t olen = 0;
+    // worst-case size + null
+    size_t outSize = 4 * ((len + 2) / 3) + 4;
+    std::vector<unsigned char> out(outSize);
+    int ret = mbedtls_base64_encode(out.data(), out.size(), &olen, data, len);
+    if (ret != 0)
+    {
+        Serial.printf("Base64 encode failed: -0x%04X\n", -ret);
+        return "";
+    }
+    return String((char *)out.data());
+}
+
+std::vector<uint8_t> base64Decode(const String &b64)
+{
+    size_t olen = 0;
+    std::vector<uint8_t> out((b64.length() * 3) / 4 + 4);
+    int ret = mbedtls_base64_decode(out.data(), out.size(), &olen,
+                                    (const unsigned char *)b64.c_str(),
+                                    b64.length());
+    if (ret != 0)
+    {
+        Serial.printf("Base64 decode failed: -0x%04X\n", -ret);
+        return {};
+    }
+    out.resize(olen);
+    return out;
+}
+
+void randBytes(uint8_t *buf, size_t len)
+{
+    // Use CTR-DRBG for cryptographic random
+    mbedtls_ctr_drbg_random(&ctr_drbg, buf, len);
+}
+
+// ---------- HKDF (SHA-256) ----------
+int hkdf_sha256(const uint8_t *ikm, size_t ikm_len,
+                const uint8_t *salt, size_t salt_len,
+                const uint8_t *info, size_t info_len,
+                uint8_t *okm, size_t okm_len)
+{
+#if defined(MBEDTLS_MD_HKDF_C)
+    const mbedtls_md_info_t *md = mbedtls_md_info_from_type(MBEDTLS_MD_SHA256);
+    int ret = mbedtls_hkdf(md, salt, salt_len, ikm, ikm_len, info, info_len, okm, okm_len);
+    return ret;
+#else
+    // Minimal HKDF Extract+Expand (if HKDF is not enabled in mbedTLS build)
+    const mbedtls_md_info_t *md = mbedtls_md_info_from_type(MBEDTLS_MD_SHA256);
+    uint8_t prk[32];
+
+    // Extract: PRK = HMAC(salt, IKM)
+    mbedtls_md_context_t hctx;
+    mbedtls_md_init(&hctx);
+    mbedtls_md_setup(&hctx, md, 1);
+    mbedtls_md_hmac_starts(&hctx, salt, salt_len);
+    mbedtls_md_hmac_update(&hctx, ikm, ikm_len);
+    mbedtls_md_hmac_finish(&hctx, prk);
+
+    // Expand: OKM = T(1..N), T(i) = HMAC(PRK, T(i-1) | info | i)
+    uint8_t T[32];
+    size_t T_len = 0;
+    size_t pos = 0;
+    uint8_t counter = 1;
+
+    while (pos < okm_len)
+    {
+        mbedtls_md_hmac_starts(&hctx, prk, sizeof(prk));
+        if (T_len > 0)
+            mbedtls_md_hmac_update(&hctx, T, T_len);
+        if (info && info_len > 0)
+            mbedtls_md_hmac_update(&hctx, info, info_len);
+        mbedtls_md_hmac_update(&hctx, &counter, 1);
+        mbedtls_md_hmac_finish(&hctx, T);
+        size_t to_copy = (okm_len - pos > 32) ? 32 : (okm_len - pos);
+        memcpy(okm + pos, T, to_copy);
+        pos += to_copy;
+        T_len = 32;
+        counter++;
+    }
+    mbedtls_md_free(&hctx);
+    return 0;
+#endif
+}
+
+// ---------- HMAC (SHA-256) ----------
+std::vector<uint8_t> hmac_sign(const uint8_t *msg, size_t len)
+{
+    const mbedtls_md_info_t *md = mbedtls_md_info_from_type(MBEDTLS_MD_SHA256);
+    std::vector<uint8_t> mac(32);
+    mbedtls_md_hmac(md, g_hmac_key.data(), g_hmac_key.size(), msg, len, mac.data());
+    return mac;
+}
+
+bool hmac_verify(const uint8_t *msg, size_t len, const uint8_t *mac, size_t macLen)
+{
+    if (!g_hmac_ready)
+    {
+        Serial.println("HMAC verify failed: key not ready");
+        return false;
+    }
+    if (macLen != 32)
+    {
+        Serial.printf("HMAC verify failed: wrong length (%d)\n", macLen);
+        return false;
+    }
+    auto calc = hmac_sign(msg, len);
+
+    printHex("HMAC verify input (msg hex): ", msg, len);
+    printHex("Received HMAC (hex): ", mac, macLen);
+    printHex("Calculated HMAC (hex): ", calc.data(), calc.size());
+
+    bool ok = (memcmp(calc.data(), mac, 32) == 0);
+    Serial.printf("HMAC verify result: %s\n", ok ? "OK" : "FAIL");
+    return ok;
+}
+
+// ---------- ECDH helpers ----------
+void ecdh_prepare()
+{
+    mbedtls_ecdh_init(&ecdh_ctx);
+
+    // entropy + DRBG
+    mbedtls_entropy_init(&entropy);
+    mbedtls_ctr_drbg_init(&ctr_drbg);
+    const char *pers = "ecosmart-ecdh";
+    int ret = mbedtls_ctr_drbg_seed(&ctr_drbg, mbedtls_entropy_func, &entropy,
+                                    (const unsigned char *)pers, strlen(pers));
+    if (ret != 0)
+    {
+        Serial.printf("DRBG seed failed: -0x%04X\n", -ret);
+    }
+
+    // curve and keypair
+    mbedtls_ecp_group_load(&ecdh_ctx.grp, MBEDTLS_ECP_DP_SECP256R1);
+    ret = mbedtls_ecp_gen_keypair(&ecdh_ctx.grp, &ecdh_ctx.d, &ecdh_ctx.Q,
+                                  mbedtls_ctr_drbg_random, &ctr_drbg);
+    if (ret != 0)
+    {
+        Serial.printf("Keypair generation failed: -0x%04X\n", -ret);
+    }
+}
+
+std::vector<uint8_t> export_device_pub_uncompressed()
+{
+    // 0x04 || X(32) || Y(32)
+    std::vector<uint8_t> out(65);
+    out[0] = 0x04;
+    mbedtls_mpi_write_binary(&ecdh_ctx.Q.X, out.data() + 1, 32);
+    mbedtls_mpi_write_binary(&ecdh_ctx.Q.Y, out.data() + 33, 32);
+    return out;
+}
+
+// ---------- WebSocket handling ----------
+void handleWebSocketMessage(void *arg, uint8_t *data, size_t len)
+{
+    AwsFrameInfo *info = (AwsFrameInfo *)arg;
+    if (!(info->final && info->index == 0 && info->len == len && info->opcode == WS_TEXT))
+        return;
+
+    JsonDocument doc;
+    DeserializationError derr = deserializeJson(doc, (const char *)data, len);
+    if (derr)
+    {
+        Serial.printf("JSON parse error: %s\n", derr.c_str());
+        return;
+    }
+
+    String type = doc["type"] | "";
+
+    if (type == "hello")
+    {
+        Serial.println("Received hello; sending device_pubkey");
+        // Prepare ECDH (keypair already ready in setup, but you can regenerate per session if desired)
+        auto pub = export_device_pub_uncompressed();
+        printHex("Device pubkey (hex): ", pub.data(), pub.size());
+        String pubB64 = base64Encode(pub.data(), pub.size());
+
+        JsonDocument out;
+        out["type"] = "device_pubkey";
+        out["curve"] = "P-256";
+        out["pub"] = pubB64;
+        // proto_version: 1
+        String s;
+        serializeJson(out, s);
+        ws.textAll(s);
+    }
+    else if (type == "pwa_pubkey")
+    {
+        Serial.println("Handling pwa_pubkey");
+
+        // Decode PWA raw public key (expect 65 bytes, first byte 0x04)
+        String pubRawB64 = doc["pubRaw"] | "";
+        auto peerPub = base64Decode(pubRawB64);
+        size_t peerPubLen = peerPub.size();
+        Serial.printf("Peer pub decoded len: %d\n", (int)peerPubLen);
+
+        if (peerPubLen != 65 || peerPub[0] != 0x04)
+        {
+            printHex("Peer pub (decoded, hex): ", peerPub.data(), peerPubLen);
+            Serial.println("Invalid peer public key format");
+            ws.textAll("{\"type\":\"error\",\"msg\":\"bad_peer_pub_format\"}");
+            return;
+        }
+        printHex("Peer pubkey (hex): ", peerPub.data(), peerPubLen);
+
+        int ret = mbedtls_ecp_point_read_binary(&ecdh_ctx.grp, &ecdh_ctx.Qp,
+                                                peerPub.data(), peerPubLen);
+        if (ret != 0)
+        {
+            Serial.printf("Import peer pub failed: -0x%04X\n", -ret);
+            ws.textAll("{\"type\":\"error\",\"msg\":\"import_peer_pub_failed\"}");
+            return;
+        }
+        Serial.println("Imported PWA public key OK");
+
+        // Decode HKDF parameters
+        String saltB64 = doc["hkdfSalt"] | "";
+        String infoB64 = doc["hkdfInfo"] | "";
+        auto hkdf_salt = base64Decode(saltB64);
+        auto hkdf_info = base64Decode(infoB64);
+        if (hkdf_salt.empty() || hkdf_info.empty())
+        {
+            Serial.println("HKDF params missing or decode failed");
+            ws.textAll("{\"type\":\"error\",\"msg\":\"hkdf_params_bad\"}");
+            return;
+        }
+        printHex("HKDF salt (hex): ", hkdf_salt.data(), hkdf_salt.size());
+        printHex("HKDF info (hex): ", hkdf_info.data(), hkdf_info.size());
+
+        // Compute shared secret z = d * Qp
+        uint8_t ikm[32];
+        ret = mbedtls_ecdh_compute_shared(&ecdh_ctx.grp, &ecdh_ctx.z,
+                                          &ecdh_ctx.Qp, &ecdh_ctx.d,
+                                          mbedtls_ctr_drbg_random, &ctr_drbg);
+        if (ret != 0)
+        {
+            Serial.printf("ECDH compute_shared failed: -0x%04X\n", -ret);
+            ws.textAll("{\"type\":\"error\",\"msg\":\"ecdh_compute_failed\"}");
+            return;
+        }
+        ret = mbedtls_mpi_write_binary(&ecdh_ctx.z, ikm, sizeof(ikm));
+        if (ret != 0)
+        {
+            Serial.printf("Shared secret export failed: -0x%04X\n", -ret);
+            ws.textAll("{\"type\":\"error\",\"msg\":\"secret_export_failed\"}");
+            return;
+        }
+        printHex("Shared secret (z, hex): ", ikm, sizeof(ikm));
+
+        // Derive HMAC key via HKDF
+        g_hmac_key.assign(32, 0);
+        ret = hkdf_sha256(ikm, sizeof(ikm),
+                          hkdf_salt.data(), hkdf_salt.size(),
+                          hkdf_info.data(), hkdf_info.size(),
+                          g_hmac_key.data(), g_hmac_key.size());
+        if (ret != 0)
+        {
+            Serial.printf("HKDF derive failed: -0x%04X\n", -ret);
+            ws.textAll("{\"type\":\"error\",\"msg\":\"hkdf_failed\"}");
+            return;
+        }
+        g_hmac_ready = true;
+        printHex("Derived HMAC key (hex): ", g_hmac_key.data(), g_hmac_key.size());
+
+        // Signal ready
+        JsonDocument out;
+        out["type"] = "ready_for_kdf_ack";
+        String s;
+        serializeJson(out, s);
+        ws.textAll(s);
+    }
+    else if (type == "challenge")
+    {
+        if (!g_hmac_ready)
+        {
+            ws.textAll("{\"type\":\"error\",\"msg\":\"hmac_not_ready\"}");
+            return;
+        }
+        // Verify PWA's challenge
+        String nonceB64 = doc["nonce"] | "";
+        String hmacB64 = doc["hmac"] | "";
+        auto nonce = base64Decode(nonceB64);
+        auto mac = base64Decode(hmacB64);
+
+        printHex("HMAC verify input (msg hex): ", nonce.data(), nonce.size());
+        printHex("Received HMAC (hex): ", mac.data(), mac.size());
+
+        bool ok = hmac_verify(nonce.data(), nonce.size(), mac.data(), mac.size());
+        if (!ok)
+        {
+            ws.textAll("{\"type\":\"error\",\"msg\":\"bad_hmac\"}");
+            return;
+        }
+
+        // Respond with our own challenge
+        uint8_t nonce2[16];
+        randBytes(nonce2, sizeof(nonce2));
+        auto mac2 = hmac_sign(nonce2, sizeof(nonce2));
+
+        String nonce2B64 = base64Encode(nonce2, sizeof(nonce2));
+        String mac2B64 = base64Encode(mac2.data(), mac2.size());
+
+        JsonDocument out;
+        out["type"] = "challenge_reply";
+        out["nonce"] = nonce2B64;
+        out["hmac"] = mac2B64;
+        String s;
+        serializeJson(out, s);
+        ws.textAll(s);
+    }
+    // In the message router
+    else if (type == "session_ok")
+    {
+        if (!g_authenticated)
+        {
+            ws.textAll("{\"type\":\"error\",\"msg\":\"not_authenticated\"}");
+            return;
+        }
+        Serial.println("Session confirmed; entering application mode");
+        ws.textAll("{\"type\":\"session_ready\"}");
+        // Optionally send device status snapshot here
+    }
+    else
+    {
+        Serial.printf("Unknown message type: %s\n", type.c_str());
+    }
+    // AwsFrameInfo *info = (AwsFrameInfo *)arg;
+    // if (info->final && info->index == 0 && info->len == len && info->opcode == WS_TEXT)
+    // {
+    //     data[len] = 0;
+    //     if (strcmp((char *)data, "toggle") == 0)
+    //     {
+    //         ledState = !ledState;
+    //         notifyClients();
+    //     }
+    // }
+}
+
+void onEvent(AsyncWebSocket *server, AsyncWebSocketClient *client, AwsEventType type,
+             void *arg, uint8_t *data, size_t len)
+{
+    switch (type)
+    {
+    case WS_EVT_CONNECT:
+        Serial.printf("WebSocket client #%u connected from %s\n", client->id(), client->remoteIP().toString().c_str());
+        break;
+    case WS_EVT_DISCONNECT:
+        Serial.printf("WebSocket client #%u disconnected\n", client->id());
+        break;
+    case WS_EVT_DATA:
+        handleWebSocketMessage(arg, data, len);
+        break;
+    case WS_EVT_PONG:
+    case WS_EVT_ERROR:
+        break;
+    }
+}
+
+String processor(const String &var)
+{
+    Serial.println(var);
+    if (var == "STATE")
+    {
+        if (ledState)
+        {
+            return "ON";
+        }
+        else
+        {
+            return "OFF";
+        }
+    }
+    return String();
+}
+
+void setup()
+{
+    pinMode(PIN_LED_1, OUTPUT);
+    pinMode(PIN_LED_1, OUTPUT);
+    pinMode(PIN_SR_CLOCK, OUTPUT);
+    pinMode(PIN_SR_DATA, OUTPUT);
+    pinMode(PIN_SR_LATCH, OUTPUT);
+
+    Serial.begin(115200);
+    delay(200);
+    Serial.println("System Starting ....");
+
+    pinMode(PIN_I2S_PDN, OUTPUT);
+    digitalWrite(PIN_I2S_PDN, HIGH); // Power up TAS5805M
+    Serial.println("PDN pin set HIGH (TAS5805M active)");
+
+    WiFi.mode(WIFI_STA);
+    WiFi.begin("megafaYakand8202", "megafaY@kand*@)@");
+    Serial.print("\r\nConnect to WiFi ..");
+    while (WiFi.status() != WL_CONNECTED)
+    {
+        Serial.print('.');
+        delay(1000);
+    }
+    Serial.println();
+    if (WiFi.status() == WL_CONNECTED)
+    {
+        Serial.printf("WiFi connected: %s\n", WiFi.localIP().toString().c_str());
+    }
+    else
+    {
+        Serial.println("WiFi connect failed; continuing anyway");
+    }
+
+    // Prepare ECDH context and keypair
+    ecdh_prepare();
+
+    server.on("/", HTTP_GET, [](AsyncWebServerRequest *request)
+              { request->send(200, "text/plain", "EcoSmart"); });
+    server.onNotFound([](AsyncWebServerRequest *request)
+                      { request->send(404, "text/plain", "Not found"); });
+    updateServer.setup(&server);
+    // hook to update events if you need to
+    updateServer.onUpdateBegin = [](const UpdateType type, int &result)
+    {
+        // you can force abort the update like this if you need to:
+        // result = UpdateResult::UPDATE_ABORT;
+        Serial.println("Update started : " + String(type));
+    };
+    updateServer.onUpdateEnd = [](const UpdateType type, int &result)
+    {
+        Serial.println("Update finished : " + String(type) + " result: " + String(result));
+    };
+
+    ws.onEvent(onEvent);
+    server.addHandler(&ws);
+    server.begin();
+    Serial.printf("WebSocket server listening on ws://%s%s\n",
+                  WiFi.localIP().toString().c_str(), WS_PATH);
+
+    Wire.begin(PIN_I2C_SDA, PIN_I2C_SCL);
+
+    if (amp.init() != ESP_OK)
+    {
+        Serial.println("Failed to initialize TAS5805M");
+    }
+    else
+    {
+        uint8_t volume = 60; // Volume level (0-124)
+        esp_err_t ret = tas5805m_set_volume_pct(volume);
+        if (ret != ESP_OK)
+        {
+            ESP_LOGE("TAS5805M", "Failed to set volume");
+        }
+        ret = tas5805m_get_volume_pct(&volume);
+        if (ret != ESP_OK)
+        {
+            ESP_LOGE("TAS5805M", "Failed to get volume");
+        }
+        else
+        {
+            ESP_LOGI("TAS5805M", "Current volume: %d", volume);
+        }
+    }
+
+    bta.begin();
+    bta.reconnect();
+    bta.I2S(PIN_I2S_SCK, PIN_I2S_SDOUT, PIN_I2S_WS);
+    bta.volume(1.0);
+    bta.setSinkCallback(bt_data_cb);
+
+    // audio.setPinout(PIN_I2S_SCK, PIN_I2S_WS, PIN_I2S_SDOUT);
+    // audio.setVolume(21);
+
+    //    audio.connecttospeech("Hi, This is megaafaa Yaakand Eco Smart System.", "en");
+    //    audio.connecttoFS(SD, "/320k_test.mp3");
+    //    audio.connecttohost("http://www.wdr.de/wdrlive/media/einslive.m3u");
+    //    audio.connecttohost("https://stream.srg-ssr.ch/rsp/aacp_48.asx"); // SWISS POP
+    //    audio.connecttohost("http://mp3.ffh.de/radioffh/hqlivestream.aac"); //  128k aac
+    // audio.connecttohost("http://mp3.ffh.de/radioffh/hqlivestream.mp3"); //  128k mp3
+    // audio.connecttohost("https://portal.yakand.com/03.mp3"); //  128k mp3
+    //    audio.connecttohost("https://github.com/schreibfaul1/ESP32-audioI2S/raw/master/additional_info/Testfiles/sample1.m4a"); // m4a
+    //    audio.connecttohost("https://github.com/schreibfaul1/ESP32-audioI2S/raw/master/additional_info/Testfiles/test_16bit_stereo.wav"); // wav
+    //    audio.connecttospeech("Wenn die Hunde schlafen, kann der Wolf gut Schafe stehlen.", "de");
+    // setup_i2s();
+
+    FastLED.addLeds<WS2811, PIN_LED_1, RGB>(leds, NUM_LEDS);
+    // FastLED.addLeds<WS2811_400, PIN_LED_2, RGB>(leds, NUM_LED);
+}
+
+unsigned long loop500ms = 0;
+uint8_t loopColor = 0;
+bool lastState = ledState;
+void loop()
+{
+    if (lastState != ledState)
+    {
+        lastState = ledState;
+        ledState == true ? set_on() : set_off();
+    }
+
+    ws.cleanupClients();
+}
