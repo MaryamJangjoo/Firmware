@@ -32,6 +32,9 @@ private:
     void handleMessage(void* arg, uint8_t* data, size_t len);
     void handleWriteRegistry(JsonDocument& doc);
 
+    uint32_t requestNumber_ = 0;
+    uint32_t nextRequestNumber();
+
     AsyncWebServer* server_ = nullptr;
     AsyncWebSocket* ws_ = nullptr;
     AsyncWebSocketClient* client_ = nullptr;

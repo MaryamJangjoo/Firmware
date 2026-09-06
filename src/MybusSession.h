@@ -1,3 +1,4 @@
+// src/MybusSession.h
 #ifndef MYBUS_SESSION_H
 #define MYBUS_SESSION_H
 
@@ -7,8 +8,15 @@
 
 class MybusSession {
 public:
+    // ✅ سازنده با پارامترها
     MybusSession(HttpTransport& transport, const String& deviceId,
                  uint8_t interfaceId, uint8_t zone);
+    
+    // ❌ این خط را حذف کنید (تکراری و ناقص است)
+    // MybusSession()
+    
+    // ✅ Destructor
+    ~MybusSession();
 
     bool initializeDeviceKeypair();
     bool performHandshake(uint32_t requestNumber);

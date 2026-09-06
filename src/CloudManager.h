@@ -49,6 +49,7 @@ private:
     String apiBaseUrl_ = "http://192.168.88.174:3000";
     String deviceId_;
     String jwtToken_;
+    String siteId_;
 
     Preferences preferences_;
 

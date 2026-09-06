@@ -4,6 +4,12 @@
 #include "ecosmart_registries.h"
 #include "crypto.hpp"
 
+#include <WiFi.h>
+
+#ifndef WIFI_STA
+#define WIFI_STA 1
+#endif
+
 AppController* AppController::s_instance = nullptr;
 
 AppController::AppController()
