@@ -37,8 +37,8 @@ private:
     static constexpr int PIN_I2S_PDN   = 27;
 
     // ---- WiFi ----
-    const char* WIFI_SSID     = "megafaYakand8202";
-    const char* WIFI_PASSWORD = "megafaY@kand*@)@";
+    const char* WIFI_SSID     = "WIFI";
+    const char* WIFI_PASSWORD = "WIFI-PASS";
 
     // ---- mYBUS numeric address ----
     // ⚠️ این مقادیر باید دقیقاً با device.mybusDeviceId و

@@ -117,7 +117,7 @@ private:
     // ========================================================
 
     String apiBaseUrl_ =
-        "http://192.168.88.174:3000";
+        "http://ip:3000";
 
     // JWT / backend identity
     String deviceId_;

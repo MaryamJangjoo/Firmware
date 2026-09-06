@@ -192,7 +192,7 @@ void setup()
     Serial.println("PDN pin set HIGH (TAS5805M active)");
 
     WiFi.mode(WIFI_STA);
-    WiFi.begin("megafaYakand8202", "megafaY@kand*@)@");
+    WiFi.begin("wifi", "wifi pass");
     Serial.print("\r\nConnect to WiFi ..");
     while (WiFi.status() != WL_CONNECTED)
     {
