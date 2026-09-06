@@ -1,29 +1,229 @@
 #ifndef CRYPTO_HPP
 #define CRYPTO_HPP
 
+#include <Arduino.h>
+#include <stddef.h>
+#include <stdint.h>
 #include <vector>
-#include <array>
-#include <string>
-#include "mbedtls/ecp.h"
-#include "mbedtls/ecdh.h"
+
+#include <mbedtls/ecp.h>
+#include <mbedtls/ecdh.h>
+#include <mbedtls/entropy.h>
+#include <mbedtls/ctr_drbg.h>
+#include <mbedtls/md.h>
+#include <mbedtls/pk.h>
+#include <mbedtls/gcm.h>
+#include <mbedtls/base64.h>
+#include <mbedtls/hkdf.h>
+
+// ============================================================
+// Constants
+// ============================================================
+
+static constexpr size_t ECC_PRIVATE_KEY_SIZE = 32;
+static constexpr size_t ECC_SHARED_SECRET_SIZE = 32;
+static constexpr size_t AES256_KEY_SIZE = 32;
+static constexpr size_t AES_GCM_IV_SIZE = 12;
+static constexpr size_t AES_GCM_TAG_SIZE = 16;
+
+// ============================================================
+// Initialization
+// ============================================================
 
 bool cryptoInit();
-// Device identity management
-bool loadDeviceKeypair(mbedtls_ecp_keypair& kp);
-bool saveDeviceKeypair(const mbedtls_ecp_keypair& kp);
+
+// ============================================================
+// Device keypair
+// ============================================================
+
 bool generateDeviceKeypair(mbedtls_ecp_keypair& kp);
+bool saveDeviceKeypair(const mbedtls_ecp_keypair& kp);
+bool loadDeviceKeypair(mbedtls_ecp_keypair& kp);
 
-// Public key export/import
-bool exportUncompressedPub(const mbedtls_ecp_keypair& kp, std::vector<uint8_t>& out65);
-bool importPeerUncompressedPub(const std::vector<uint8_t>& in65, mbedtls_ecp_point& Qp, mbedtls_ecp_group& grp);
+// ============================================================
+// PEM
+// ============================================================
 
-// Shared secret and key derivation
-bool ecdhShared(mbedtls_ecp_group& grp, const mbedtls_mpi& d,
-                const mbedtls_ecp_point& Qp, uint8_t out32[32]);
-bool hkdfSha256(const uint8_t* ikm32, const uint8_t* salt, size_t saltLen,
-                const uint8_t* info, size_t infoLen,
-                uint8_t okm32[32]);
-bool hmacSha256(const uint8_t* key32, const uint8_t* msg, size_t msgLen,
-                uint8_t mac32[32]);
+bool cryptoExportPublicKeyPem(
+    const mbedtls_ecp_keypair& kp,
+    String& pem
+);
+
+bool cryptoExportPrivateKeyPem(
+    const mbedtls_ecp_keypair& kp,
+    String& pem
+);
+
+bool cryptoGenerateKeyPairPem(
+    String& privateKeyPem,
+    String& publicKeyPem
+);
+
+bool cryptoComputeSharedSecret(
+    const String& privateKeyPem,
+    const String& serverPublicKeyPem,
+    String& sharedSecretHex
+);
+
+// ============================================================
+// ECDH
+// ============================================================
+
+bool ecdhShared(
+    mbedtls_ecp_group& grp,
+    const mbedtls_mpi& privateKey,
+    const mbedtls_ecp_point& peerPublicKey,
+    uint8_t output[ECC_SHARED_SECRET_SIZE]
+);
+
+// ============================================================
+// HKDF-SHA256
+// ============================================================
+
+bool hkdfSha256(
+    const uint8_t* ikm,
+    size_t ikmLen,
+    const uint8_t* salt,
+    size_t saltLen,
+    const uint8_t* info,
+    size_t infoLen,
+    uint8_t* output,
+    size_t outputLen
+);
+
+// ============================================================
+// HMAC-SHA256
+// ============================================================
+
+bool hmacSha256(
+    const uint8_t* key,
+    size_t keyLen,
+    const uint8_t* message,
+    size_t messageLen,
+    uint8_t output[32]
+);
+
+// ============================================================
+// AES-256-GCM
+// ============================================================
+
+bool cryptoAesGcmEncrypt(
+    const uint8_t* key,
+    size_t keyLen,
+    const uint8_t* iv,
+    size_t ivLen,
+    const uint8_t* input,
+    size_t inputLen,
+    uint8_t* output,
+    uint8_t* authTag,
+    size_t authTagLen
+);
+
+bool cryptoAesGcmDecrypt(
+    const uint8_t* key,
+    size_t keyLen,
+    const uint8_t* iv,
+    size_t ivLen,
+    const uint8_t* input,
+    size_t inputLen,
+    const uint8_t* authTag,
+    size_t authTagLen,
+    uint8_t* output
+);
+
+// ============================================================
+// HEX
+// ============================================================
+
+String cryptoBytesToHex(
+    const uint8_t* data,
+    size_t length
+);
+
+bool cryptoHexToBytes(
+    const String& hex,
+    uint8_t* output,
+    size_t outputLength
+);
+
+// ============================================================
+// Base64
+// ============================================================
+
+String cryptoBytesToBase64(
+    const uint8_t* data,
+    size_t length
+);
+
+// ============================================================
+// Random & Secure
+// ============================================================
+
+bool cryptoRandomBytes(
+    uint8_t* output,
+    size_t length
+);
+
+void cryptoSecureZero(
+    void* buffer,
+    size_t length
+);
+
+// ============================================================
+// Legacy functions for server.cpp compatibility
+// ============================================================
+
+inline bool exportUncompressedPub(
+    const mbedtls_ecp_keypair& kp,
+    std::vector<uint8_t>& out65
+) {
+    out65.resize(65);
+
+    size_t olen = 0;
+
+    int ret = mbedtls_ecp_point_write_binary(
+        &kp.grp,
+        &kp.Q,
+        MBEDTLS_ECP_PF_UNCOMPRESSED,
+        &olen,
+        out65.data(),
+        out65.size()
+    );
+
+    if (ret != 0 || olen != 65) {
+        out65.clear();
+        return false;
+    }
+
+    return true;
+}
+
+inline bool importPeerUncompressedPub(
+    const std::vector<uint8_t>& in65,
+    mbedtls_ecp_point& Qp,
+    mbedtls_ecp_group& grp
+) {
+    if (in65.size() != 65) {
+        return false;
+    }
+
+    int ret = mbedtls_ecp_point_read_binary(
+        &grp,
+        &Qp,
+        in65.data(),
+        in65.size()
+    );
+
+    if (ret != 0) {
+        return false;
+    }
+
+    ret = mbedtls_ecp_check_pubkey(
+        &grp,
+        &Qp
+    );
+
+    return ret == 0;
+}
 
 #endif // CRYPTO_HPP

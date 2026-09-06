@@ -4,8 +4,14 @@
 #include <tas5805m.hpp>
 #include <btAudio.h>
 #include <FastLED.h>
-#include "server.hpp"
+
+#include "CloudManager.h"
 #include "crypto.hpp"
+#include "ecosmart_registries.h"
+
+// ============================================================
+// Pin Definitions
+// ============================================================
 
 // LED Strip pins
 #define PIN_LED_1 33
@@ -16,7 +22,7 @@
 #define PIN_I2C_SDA 21
 #define PIN_I2C_SCL 22
 
-// Shift register pins
+// Shift register pins 
 #define PIN_SR_LATCH 4
 #define PIN_SR_CLOCK 18
 #define PIN_SR_DATA 23
@@ -29,28 +35,39 @@
 #define PIN_I2S_FAULT 34 // Optional: fault monitor
 #define PIN_I2S_PDN 27   // Power-down control
 
-// ---------- Config ----------
-const char *WIFI_SSID = "megafaYakand8202";
-const char *WIFI_PASS = "megafaY@kand*@)@";
-const uint16_t WS_PORT = 80;
-const char *WS_PATH = "/ws";
-// After HMAC verify OK, set authenticated true
-bool g_authenticated = true;
+// ============================================================
+// WiFi Configuration
+// ============================================================
+
+const char* WIFI_SSID = "megafaYakand8202";
+const char* WIFI_PASSWORD = "megafaY@kand*@)@";
+
+// ============================================================
+// Hardware Objects 
+// ============================================================
 
 tas5805m amp(&Wire);
 btAudio bta = btAudio("mYSpeaker");
 CRGB leds[NUM_LEDS];
 
-bool ledState = 0;
+bool ledState = 0; 
 
 // Visualization state
-static int32_t dynamicMax = 0; // Initial guess
+static int32_t dynamicMax = 0;
 static uint32_t lastUpdate = 0;
-// static uint8_t smoothedLevel = 0;
+
+// ============================================================
+// Cloud / Networking
+// ============================================================
+
+CloudManager* cloudManager = nullptr;
+
+// ============================================================
+// Audio Visualization + Bluetooth sink 
+// ============================================================
 
 void visualizeAudio(const uint8_t *data, uint32_t len)
 {
-    // 2. Visualize audio
     int16_t *samples = (int16_t *)data;
     int peak = 0;
     for (uint32_t i = 0; i < len / 2; i++)
@@ -60,12 +77,11 @@ void visualizeAudio(const uint8_t *data, uint32_t len)
             peak = val;
     }
     if (peak > dynamicMax)
-        dynamicMax = peak; // Expand range if needed
+        dynamicMax = peak;
 
-    // Decay over time to adapt to quieter music
     if (millis() - lastUpdate > 50)
     {
-        dynamicMax = max(peak, dynamicMax - 5); // Decay slowly
+        dynamicMax = max(peak, dynamicMax - 5);
         lastUpdate = millis();
     }
     uint8_t level = map(peak, 0, 32767, 0, NUM_LEDS);
@@ -75,41 +91,185 @@ void visualizeAudio(const uint8_t *data, uint32_t len)
     }
     FastLED.show();
 }
+
 void bt_data_cb(const uint8_t *data, uint32_t len)
 {
-    // Send audio to I2S
     size_t written;
     i2s_write(I2S_NUM_0, data, len, &written, portMAX_DELAY);
-
-    // Visualize audio
     visualizeAudio(data, len);
 }
+
+// ============================================================
+// Curtain shift-register control 
+// ============================================================
+
 void set_on()
 {
-    // ground latchPin and hold low for as long as you are transmitting
     digitalWrite(PIN_SR_LATCH, LOW);
     shiftOut(PIN_SR_DATA, PIN_SR_CLOCK, LSBFIRST, 0xff);
     shiftOut(PIN_SR_DATA, PIN_SR_CLOCK, LSBFIRST, 0xff);
-    // return the latch pin high to signal chip that it
-    // no longer needs to listen for information
-    digitalWrite(PIN_SR_LATCH, HIGH);
-}
-void set_off()
-{
-    // ground latchPin and hold low for as long as you are transmitting
-    digitalWrite(PIN_SR_LATCH, LOW);
-    shiftOut(PIN_SR_DATA, PIN_SR_CLOCK, LSBFIRST, 0);
-    shiftOut(PIN_SR_DATA, PIN_SR_CLOCK, LSBFIRST, 0);
-    // return the latch pin high to signal chip that it
-    // no longer needs to listen for information
     digitalWrite(PIN_SR_LATCH, HIGH);
 }
 
+void set_off()
+{
+    digitalWrite(PIN_SR_LATCH, LOW);
+    shiftOut(PIN_SR_DATA, PIN_SR_CLOCK, LSBFIRST, 0);
+    shiftOut(PIN_SR_DATA, PIN_SR_CLOCK, LSBFIRST, 0);
+    digitalWrite(PIN_SR_LATCH, HIGH);
+}
+
+
+bool handleAudioRegistryWrite(uint16_t regAddr, const String& regVal)
+{
+    if (regAddr == REG_AUDIO_VOLUME) {
+        int vol = regVal.toInt();
+        vol = constrain(vol, 0, 124);
+        esp_err_t ret = tas5805m_set_volume_pct((uint8_t)vol);
+        Serial.printf("[AUDIO] Volume -> %d (%s)\n", vol, ret == ESP_OK ? "OK" : "FAIL");
+        return ret == ESP_OK;
+    }
+
+    if (regAddr == REG_AUDIO_CONTROL) {
+        int cmd = regVal.toInt();
+        Serial.printf("[AUDIO] Control command: %d\n", cmd);
+        switch (cmd) {
+            case 1:
+                bta.reconnect(); 
+                break;
+            case 0:
+            case 2:
+                
+                Serial.println("[AUDIO] ⚠️ Stop/Pause not wired yet - verify btAudio API");
+                break;
+            default:
+                return false;
+        }
+        return true;
+    }
+
+    if (regAddr == REG_AUDIO_BASS || regAddr == REG_AUDIO_TREBLE || regAddr == REG_AUDIO_EQ) {
+       
+        Serial.printf("[AUDIO] ⚠️ Bass/Treble/EQ register 0x%04X received but not wired yet\n", regAddr);
+        return true; 
+    }
+
+    return false; 
+}
+
+// ============================================================
+// Command Callback - از CloudManager فراخوانی می‌شود
+// (هم برای فرمان‌های legacy "COMMAND" و هم - بعد از پچ - برای
+// WRITE_REGISTRY محلی)
+// ============================================================
+
+void onCommandReceived(const JsonDocument& command) {
+    Serial.println("[CMD] Command received:");
+    serializeJson(command, Serial);
+    Serial.println();
+
+    String action = command["action"] | "";
+
+    if (action == "REBOOT") {
+        Serial.println("[CMD] Rebooting ESP32...");
+        ESP.restart();
+
+    } else if (action == "STATUS") {
+        Serial.println("[CMD] Status requested");
+
+    } else if (action == "GET_REGISTRY") {
+        uint16_t regAddr = command["RegAdd"] | 0;
+        Serial.printf("[CMD] Get registry: 0x%04X\n", regAddr);
+
+        if (cloudManager != nullptr && cloudManager->isSecureSessionEstablished()) {
+            JsonDocument req;
+            req["RegAdd"] = regAddr;
+            req["RegVal"] = "";
+
+            JsonDocument response;
+            if (cloudManager->sendMybusData(req, &response)) {
+                Serial.println("[CMD] ✅ Registry response received:");
+                serializeJson(response, Serial);
+                Serial.println();
+
+                if (cloudManager->isWebSocketConnected()) {
+                    JsonDocument wsMsg;
+                    wsMsg["type"] = "registry_response";
+                    wsMsg["RegAdd"] = regAddr;
+                    if (!response["value"].isNull()) {
+                        wsMsg["value"] = response["value"];
+                    }
+                    wsMsg["payloadHex"] = response["payloadHex"] | "";
+                    cloudManager->sendRealtimeData(wsMsg);
+                }
+            } else {
+                Serial.println("[CMD] ❌ Failed to get registry / no response decoded");
+            }
+        }
+
+    } else if (action == "SET_REGISTRY") {
+        uint16_t regAddr = command["RegAdd"] | 0;
+        String regVal = command["RegVal"] | "";
+        Serial.printf("[CMD] Set registry: 0x%04X = %s\n", regAddr, regVal.c_str());
+
+       
+        bool handledLocally = handleAudioRegistryWrite(regAddr, regVal);
+        if (handledLocally) {
+            Serial.println("[CMD] ✅ Handled locally on audio hardware");
+        } else {
+            Serial.println("[CMD] ℹ️ Register not part of Phase-1 (audio) map - ignored locally");
+            ()
+        }
+
+        
+        if (cloudManager != nullptr && cloudManager->isSecureSessionEstablished()) {
+            JsonDocument req;
+            req["RegAdd"] = regAddr;
+            req["RegVal"] = regVal;
+            cloudManager->sendMybusData(req);
+        }
+    }
+}
+
+// ============================================================
+// WiFi Connection 
+// ============================================================
+
+bool connectToWiFi() {
+    Serial.println();
+    Serial.print("[WiFi] Connecting to ");
+    Serial.println(WIFI_SSID);
+
+    WiFi.mode(WIFI_STA);
+    WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
+
+    int attempts = 0;
+    while (WiFi.status() != WL_CONNECTED && attempts < 30) {
+        delay(500);
+        Serial.print(".");
+        attempts++;
+    }
+    Serial.println();
+
+    if (WiFi.status() == WL_CONNECTED) {
+        Serial.println("[WiFi] ✅ Connected!");
+        Serial.print("[WiFi] 📶 IP: ");
+        Serial.println(WiFi.localIP());
+        return true;
+    }
+    Serial.println("[WiFi] ❌ Connection failed!");
+    return false;
+}
+
+// ============================================================
+// Setup
+// ============================================================
 
 void setup()
 {
+    
     pinMode(PIN_LED_1, OUTPUT);
-    pinMode(PIN_LED_1, OUTPUT);
+    pinMode(PIN_LED_2, OUTPUT); 
     pinMode(PIN_SR_CLOCK, OUTPUT);
     pinMode(PIN_SR_DATA, OUTPUT);
     pinMode(PIN_SR_LATCH, OUTPUT);
@@ -119,51 +279,75 @@ void setup()
     Serial.println("System Starting ....");
 
     pinMode(PIN_I2S_PDN, OUTPUT);
-    digitalWrite(PIN_I2S_PDN, LOW); // Power down TAS5805M
-    Serial.println("PDN pin set HIGH (TAS5805M active)");
+    digitalWrite(PIN_I2S_PDN, LOW); // Power up TAS5805M
+    Serial.println("PDN pin set LOW (TAS5805M active)");
 
-    WiFi.mode(WIFI_STA);
-    WiFi.begin(WIFI_SSID, WIFI_PASS);
-    Serial.print("\r\nConnect to WiFi ..");
-    while (WiFi.status() != WL_CONNECTED)
-    {
-        Serial.print('.');
-        delay(500);
-    }
-    Serial.println();
-    if (WiFi.status() == WL_CONNECTED)
-    {
-        Serial.printf("WiFi connected: %s\n", WiFi.localIP().toString().c_str());
-    }
-    else
-    {
-        Serial.println("WiFi connect failed; continuing anyway");
+    
+    if (!connectToWiFi()) {
+        Serial.println("[ERROR] WiFi connection failed. Retrying in 5 seconds...");
+        delay(5000);
+        ESP.restart();
+        return;
     }
 
-    cryptoInit();
-    serverBegin();
+    // ---- CloudManager ----
+    Serial.println("[CLOUD] Initializing CloudManager...");
+    cloudManager = new CloudManager();
+    if (cloudManager == nullptr) {
+        Serial.println("[ERROR] Failed to create CloudManager");
+        return;
+    }
+    cloudManager->setApiBaseUrl("http://192.168.88.174:3000");
+    cloudManager->onCommand(onCommandReceived);
+    Serial.println("[CLOUD] CloudManager initialized successfully");
 
+    // ---- Login ----
+    Serial.println("[AUTH] Attempting to login...");
+    bool loginSuccess = cloudManager->loginUser(
+        "tes29t_operator", "SecurePassword@2026", cloudManager->getDeviceId());
+
+    if (loginSuccess) {
+        Serial.println("[AUTH] ✅ Login successful!");
+    } else {
+        Serial.println("[AUTH] ❌ Login failed, trying offline...");
+        if (cloudManager->loginOffline("tes29t_operator", "SecurePassword@2026")) {
+            Serial.println("[AUTH] ✅ Offline login successful!");
+        } else {
+            Serial.println("[AUTH] ❌ Offline login failed!");
+        }
+    }
+
+    // ---- mYBUS Handshake ----
+    if (cloudManager->isLoggedIn()) {
+        if (cloudManager->isSecureSessionEstablished()) {
+            Serial.println("[mYBUS] ✅ Using restored session from NVS, skipping handshake");
+        } else {
+            Serial.println("[mYBUS] Starting handshake...");
+            if (cloudManager->performHandshake()) {
+                Serial.println("[mYBUS] ✅ Handshake successful!");
+            } else {
+                Serial.println("[mYBUS] ❌ Handshake failed!");
+            }
+        }
+    }
+
+    // ---- WebSocket Server محلی ----
+    cloudManager->startWebSocketServer();
+    Serial.println("[WS] WebSocket server started on /ws");
+
+    
     Wire.begin(PIN_I2C_SDA, PIN_I2C_SCL);
 
-    if (amp.init() != ESP_OK)
-    {
+    if (amp.init() != ESP_OK) {
         Serial.println("Failed to initialize TAS5805M");
-    }
-    else
-    {
-        uint8_t volume = 60; // Volume level (0-124)
-        esp_err_t ret = tas5805m_set_volume_pct(volume);
-        if (ret != ESP_OK)
-        {
+    } else {
+        uint8_t volume = 60;
+        if (tas5805m_set_volume_pct(volume) != ESP_OK) {
             ESP_LOGE("TAS5805M", "Failed to set volume");
         }
-        ret = tas5805m_get_volume_pct(&volume);
-        if (ret != ESP_OK)
-        {
+        if (tas5805m_get_volume_pct(&volume) != ESP_OK) {
             ESP_LOGE("TAS5805M", "Failed to get volume");
-        }
-        else
-        {
+        } else {
             ESP_LOGI("TAS5805M", "Current volume: %d", volume);
         }
     }
@@ -174,34 +358,51 @@ void setup()
     bta.volume(1.0);
     bta.setSinkCallback(bt_data_cb);
 
-    // audio.setPinout(PIN_I2S_SCK, PIN_I2S_WS, PIN_I2S_SDOUT);
-    // audio.setVolume(21);
 
-    //    audio.connecttospeech("Hi, This is megaafaa Yaakand Eco Smart System.", "en");
-    //    audio.connecttoFS(SD, "/320k_test.mp3");
-    //    audio.connecttohost("http://www.wdr.de/wdrlive/media/einslive.m3u");
-    //    audio.connecttohost("https://stream.srg-ssr.ch/rsp/aacp_48.asx"); // SWISS POP
-    //    audio.connecttohost("http://mp3.ffh.de/radioffh/hqlivestream.aac"); //  128k aac
-    // audio.connecttohost("http://mp3.ffh.de/radioffh/hqlivestream.mp3"); //  128k mp3
-    // audio.connecttohost("https://portal.yakand.com/03.mp3"); //  128k mp3
-    //    audio.connecttohost("https://github.com/schreibfaul1/ESP32-audioI2S/raw/master/additional_info/Testfiles/sample1.m4a"); // m4a
-    //    audio.connecttohost("https://github.com/schreibfaul1/ESP32-audioI2S/raw/master/additional_info/Testfiles/test_16bit_stereo.wav"); // wav
-    //    audio.connecttospeech("Wenn die Hunde schlafen, kann der Wolf gut Schafe stehlen.", "de");
-    // setup_i2s();
-
-    // FastLED.addLeds<WS2811, PIN_LED_1, RGB>(leds, NUM_LEDS);
+    Serial.println();
+    Serial.println("========================================");
+    Serial.println("✅ ESP32 Ready! (Phase 1: Audio wired to registries)");
+    Serial.println("========================================");
+    Serial.println();
 }
+
+// ============================================================
+// Loop
+// ============================================================
 
 unsigned long loop500ms = 0;
 uint8_t loopColor = 0;
 bool lastState = ledState;
+
 void loop()
 {
+    // ---- CloudManager housekeeping ----
+    if (cloudManager != nullptr) {
+        cloudManager->loopWebSocketServer();
+    }
+
+    // ---- WiFi reconnection ----
+    if (WiFi.status() != WL_CONNECTED) {
+        Serial.println("[WiFi] Connection lost. Reconnecting...");
+        WiFi.reconnect();
+        int attempts = 0;
+        while (WiFi.status() != WL_CONNECTED && attempts < 20) {
+            delay(500);
+            attempts++;
+        }
+        if (WiFi.status() == WL_CONNECTED) {
+            Serial.println("[WiFi] ✅ Reconnected!");
+        } else {
+            Serial.println("[WiFi] ❌ Reconnect failed!");
+        }
+    }
+
+    
     if (lastState != ledState)
     {
         lastState = ledState;
         ledState == true ? set_on() : set_off();
     }
 
-    ws.cleanupClients();
+    delay(100);
 }
