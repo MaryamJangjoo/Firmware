@@ -17,50 +17,152 @@ public:
     CloudManager();
     ~CloudManager();
 
-    // ---- Auth ----
-    bool loginUser(const String& u, const String& p, const String& deviceId);
+    // ========================================================
+    // Auth
+    // ========================================================
+
+    bool loginUser(
+        const String& u,
+        const String& p,
+        const String& deviceId
+    );
+
     bool refreshToken();
+
     bool isLoggedIn() const;
-    bool loginOffline(const String& u, const String& p);
 
-    // ---- mYBUS ----
+    bool loginOffline(
+        const String& u,
+        const String& p
+    );
+
+    // ========================================================
+    // mYBUS
+    // ========================================================
+
     bool performHandshake();
+
     bool isSecureSessionEstablished() const;
-    bool sendMybusData(JsonDocument& data, JsonDocument* outResponse = nullptr);
-    bool sendRegistryFrame(uint16_t regAddr, const uint8_t* val, size_t len,
-                            bool isWrite, uint8_t busDeviceId = 1,
-                            JsonDocument* outResponse = nullptr);
 
-    // ---- WebSocket ----
+    bool sendMybusData(
+        JsonDocument& data,
+        JsonDocument* outResponse = nullptr
+    );
+
+    bool sendRegistryFrame(
+        uint16_t regAddr,
+        const uint8_t* val,
+        size_t len,
+        bool isWrite,
+        uint8_t busDeviceId = 0,
+        JsonDocument* outResponse = nullptr
+    );
+
+    // ========================================================
+    // mYBUS Address Configuration
+    // ========================================================
+
+    void setMybusDeviceId(
+        uint8_t deviceId
+    );
+
+    void setMybusZoneId(
+        uint8_t zone
+    );
+
+    uint8_t getMybusDeviceId() const;
+
+    uint8_t getMybusZoneId() const;
+
+    // ========================================================
+    // WebSocket
+    // ========================================================
+
     void startWebSocketServer();
-    void loopWebSocketServer();
-    bool isWebSocketConnected() const;
-    bool sendRealtimeData(JsonDocument& data);
-    void onCommand(CloudWebSocketServer::CommandCallback cb);
 
-    // ---- Config ----
-    void setApiBaseUrl(const String& url);
+    void loopWebSocketServer();
+
+    bool isWebSocketConnected() const;
+
+    bool sendRealtimeData(
+        JsonDocument& data
+    );
+
+    void onCommand(
+        CloudWebSocketServer::CommandCallback cb
+    );
+
+    // ========================================================
+    // Config
+    // ========================================================
+
+    void setApiBaseUrl(
+        const String& url
+    );
+
     String getApiBaseUrl() const;
-    void setDeviceId(const String& id);
+
+    void setDeviceId(
+        const String& id
+    );
+
     String getDeviceId() const;
+
     String getJwtToken() const;
 
 private:
-    String apiBaseUrl_ = "http://192.168.88.174:3000";
+
+    // ========================================================
+    // Backend API
+    // ========================================================
+
+    String apiBaseUrl_ =
+        "http://192.168.88.174:3000";
+
+    // JWT / backend identity
     String deviceId_;
+
     String jwtToken_;
+
     String siteId_;
+
+    // ========================================================
+    // mYBUS Address
+    //
+    // These MUST match backend:
+    //
+    // device.mybusDeviceId
+    // device.mybusZoneId
+    // ========================================================
+
+    uint8_t mybusDeviceId_ = 0;
+
+    uint8_t mybusZoneId_ = 0;
+
+    // ========================================================
+    // Services
+    // ========================================================
 
     Preferences preferences_;
 
     HttpTransport httpTransport_;
+
     CloudAuth auth_;
+
     CloudStorage storage_;
+
     MybusSession mybusSession_;
+
     MybusTransport mybusTransport_;
+
     CloudWebSocketServer wsServer_;
 
+    // ========================================================
+    // mYBUS Request Number
+    // ========================================================
+
     uint32_t requestNumber_ = 0;
+
     uint32_t nextRequestNumber();
 };
 
