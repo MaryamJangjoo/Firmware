@@ -48,9 +48,12 @@
 #define MYBUS_MIN_FRAME_SIZE     (MYBUS_HEADER_SIZE + MYBUS_CRC_SIZE) // 20
 
 // Commands
+//
+// ✅ MYBUS_CMD_READ_REGISTRY / MYBUS_CMD_WRITE_REGISTRY حذف شدند: این دو
+// ماکرو هیچ‌جای کدبیس استفاده نمی‌شدند (mybus_proto::COMMAND_REGISTRY در
+// mybus_protocol_constants.h جای آن‌ها استفاده می‌شود). نگه‌داشتن دو ماکرو
+// موازی با همان مقدار ریسک واگرایی در تغییرات آینده داشت.
 #define MYBUS_CMD_SET_ADDRESS     1
-#define MYBUS_CMD_READ_REGISTRY   2
-#define MYBUS_CMD_WRITE_REGISTRY  2  // same command code, RegVal empty = read
 #define MYBUS_CMD_WHO_IS          3
 #define MYBUS_CMD_PING            4
 

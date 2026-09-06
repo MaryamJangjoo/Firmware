@@ -40,6 +40,13 @@ private:
     const char* WIFI_SSID     = "megafaYakand8202";
     const char* WIFI_PASSWORD = "megafaY@kand*@)@";
 
+    // ---- mYBUS numeric address ----
+    // ⚠️ این مقادیر باید دقیقاً با device.mybusDeviceId و
+    // device.mybusZoneId این دستگاه در بک‌اند یکی باشند، وگرنه
+    // performHandshake() با "Invalid Device ID/Zone" شکست می‌خورد.
+    static constexpr uint8_t MYBUS_DEVICE_ID = 1;
+    static constexpr uint8_t MYBUS_ZONE_ID   = 1;
+
     // ---- Hardware objects ----
     tas5805m amp;
     btAudio  bta;
@@ -57,6 +64,7 @@ private:
     bool connectToWiFi();
     void initCloudManager();
     void initAudioHardware();
+    void configureMybusAddress();
 
     // ---- loop helpers ----
     void handleWiFiReconnect();
@@ -72,6 +80,7 @@ private:
     static void btDataTrampoline(const uint8_t* data, uint32_t len);
 
     bool handleAudioRegistryWrite(uint16_t regAddr, const String& regVal);
+    bool handleCurtainRegistryWrite(uint16_t regAddr, const String& regVal);
 
     // ---- Cloud command handling ----
     void onCommandReceived(const JsonDocument& command);

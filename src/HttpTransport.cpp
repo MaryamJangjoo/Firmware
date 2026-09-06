@@ -138,17 +138,28 @@ bool HttpTransport::sendRawBinaryToBackend(const uint8_t* data, size_t len,
     // (نسخه‌ی ساده‌شده‌ی حلقه‌ی قدیمی: به‌جای شرط تکراری، فقط زمان
     // آخرین بایت دریافتی را دنبال می‌کنیم و بعد از IDLE_TIMEOUT_MS
     // سکوت، فرض می‌کنیم پاسخ تمام شده.)
+    //
+    // ✅ رفع باگ: قبلاً این حلقه هیچ سقف زمانی کلی نداشت - فقط سکوت
+    // ۲ ثانیه‌ای چک می‌شد. اگر سرور بایت‌ها را کند-کند (هر کمتر از
+    // ۲ ثانیه یک بایت) می‌فرستاد، حلقه عملاً بی‌نهایت می‌ماند و
+    // watchdog را می‌زد. الان یک TOTAL_TIMEOUT_MS هم اضافه شده که
+    // مستقل از سکوت بین بایت‌ها، کل زمان خواندن را محدود می‌کند.
     WiFiClient& stream = http.getStream();
     std::vector<uint8_t> responseBuf;
 
     unsigned long lastByteMs = millis();
+    unsigned long startMs = millis();
     const unsigned long IDLE_TIMEOUT_MS = 2000;
+    const unsigned long TOTAL_TIMEOUT_MS = 20000;
 
     while (true) {
         if (stream.available()) {
             responseBuf.push_back(static_cast<uint8_t>(stream.read()));
             lastByteMs = millis();
         } else if (millis() - lastByteMs > IDLE_TIMEOUT_MS) {
+            break;
+        } else if (millis() - startMs > TOTAL_TIMEOUT_MS) {
+            Serial.println("[HTTP] ⚠️ Response read total timeout exceeded");
             break;
         } else {
             delay(1);

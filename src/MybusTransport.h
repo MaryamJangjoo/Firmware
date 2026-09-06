@@ -48,9 +48,14 @@ public:
     );
 
 private:
+    // ✅ رفع باگ: قبلاً این تابع فقط interfaceId و zone پاسخ را چک
+    // می‌کرد، نه deviceId و نه requestNumber. یک پاسخ قدیمی/اشتباه
+    // با همان interface/zone می‌توانست به اشتباه معتبر پذیرفته شود.
     bool decryptAndParseMybusResponse(
         const uint8_t* wireData,
         size_t wireLen,
+        uint8_t expectedDeviceId,
+        uint16_t expectedRequestNumber,
         JsonDocument& outDoc
     );
 

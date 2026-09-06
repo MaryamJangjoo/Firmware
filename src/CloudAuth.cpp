@@ -80,7 +80,12 @@ bool CloudAuth::refreshToken()
         return false;
     }
 
+    // ✅ رفع باگ: قبلاً بادی درخواست کاملاً خالی ساخته می‌شد و
+    // refreshTokenValue_ هیچ‌وقت به بدنه اضافه نمی‌شد، پس بک‌اند
+    // نمی‌توانست بفهمد کدام توکن باید رفرش شود.
     JsonDocument doc;
+    doc["refreshToken"] = refreshTokenValue_;
+
     String body;
     serializeJson(doc, body);
 
@@ -132,23 +137,10 @@ bool CloudAuth::isTokenValid() const
     return !jwtToken_.isEmpty();
 }
 
-// ⚠️ CloudAuth هیچ ارجاعی به CloudStorage ندارد (نگاه کنید به کامنت
-// داخل CloudAuth.h) — پس این دو متد اینجا واقعاً نمی‌توانند لاگین آفلاین
-// را انجام دهند. CloudManager از این متدها استفاده نمی‌کند و به‌جایش
-// مستقیماً از storage_ استفاده می‌کند (نگاه کنید به CloudManager::loginOffline).
-// این پیاده‌سازی فقط برای این‌که interface کامپایل و لینک شود stub است؛
-// اگر جایی مستقیماً auth_.loginOffline() صدا زده شود، همیشه false برمی‌گرداند.
-bool CloudAuth::loginOffline(const String& /*username*/, const String& /*password*/)
-{
-    Serial.println("[AUTH] ⚠️ CloudAuth::loginOffline called but not wired to CloudStorage");
-    return false;
-}
-
-bool CloudAuth::verifyUserPassword(const String& /*username*/, const String& /*password*/)
-{
-    Serial.println("[AUTH] ⚠️ CloudAuth::verifyUserPassword called but not wired to CloudStorage");
-    return false;
-}
+// ⚠️ توجه: loginOffline/verifyUserPassword از این فایل حذف شدند.
+// منطق واقعی در CloudStorage::loginOffline / CloudStorage::verifyUserPassword
+// پیاده‌سازی شده و CloudManager مستقیماً از آن استفاده می‌کند
+// (نگاه کنید به CloudManager::loginOffline).
 
 String CloudAuth::loadToken()
 {

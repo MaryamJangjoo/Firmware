@@ -16,9 +16,6 @@ public:
     bool isLoggedIn() const;
     bool isTokenValid() const;
 
-    bool loginOffline(const String& username, const String& password);
-    bool verifyUserPassword(const String& username, const String& password);
-
     String loadToken();
     void saveToken(const String& token);
 
@@ -33,8 +30,12 @@ private:
     String siteId_;
     bool isAuthenticated_ = false;
 
-    // برای loginOffline/verifyUserPassword نیاز به CloudStorage داره
-    // (وابستگی رو یا از طریق تزریق std::function بگیر یا CloudStorage& بگیر)
+    // ⚠️ توجه: پیاده‌سازی loginOffline/verifyUserPassword از این کلاس حذف شد.
+    // این دو متد قبلاً همیشه false برمی‌گرداندند چون CloudAuth هیچ ارجاعی
+    // به CloudStorage نداشت. منطق واقعی offline-login در CloudStorage است
+    // و CloudManager::loginOffline مستقیماً از storage_.loginOffline()
+    // استفاده می‌کند. اگر نیاز به offline-login از این کلاس بود، باید
+    // CloudStorage& را به سازنده تزریق کرد.
 };
 
 #endif

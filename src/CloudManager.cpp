@@ -99,6 +99,11 @@ CloudManager::CloudManager()
     // device.mybusZoneId
     //
     // on backend.
+    //
+    // ⚠️ اگر مقدار ذخیره‌شده در Preferences نباشد، این‌ها روی 0
+    // می‌مانند. تنظیم مقدار اولیه باید توسط لایه‌ی بالادستی
+    // (مثلاً AppController::begin) از طریق setMybusDeviceId()/
+    // setMybusZoneId() انجام شود - نگاه کنید به AppController.cpp.
     // --------------------------------------------------------
 
     mybusDeviceId_ =
@@ -291,6 +296,12 @@ bool CloudManager::isLoggedIn() const
 
 // ============================================================
 // Offline login
+//
+// ✅ رفع تکرار کد: قبلاً این متد کل منطق بررسی users.json را از نو
+// پیاده‌سازی می‌کرد که دقیقاً با CloudStorage::loginOffline /
+// CloudStorage::verifyUserPassword یکسان بود. حالا مستقیماً به
+// CloudStorage (که این کلاس همین الان به آن دسترسی دارد) تفویض
+// می‌شود تا فقط یک نسخه از این منطق در کدبیس وجود داشته باشد.
 // ============================================================
 
 bool CloudManager::loginOffline(
@@ -303,46 +314,10 @@ bool CloudManager::loginOffline(
         return false;
     }
 
-    std::vector<UserInfo> users;
-
-    if (!storage_.loadUsers(users)) {
-
-        Serial.println(
-            "[AUTH] No users available for offline login"
-        );
-
-        return false;
-    }
-
-    for (const auto& user : users) {
-
-        if (user.username == username) {
-
-            if (user.passwordHash == password) {
-
-                Serial.printf(
-                    "[AUTH] User '%s' verified offline\n",
-                    username.c_str()
-                );
-
-                return true;
-            }
-
-            Serial.printf(
-                "[AUTH] Invalid password for '%s'\n",
-                username.c_str()
-            );
-
-            return false;
-        }
-    }
-
-    Serial.printf(
-        "[AUTH] User '%s' not found\n",
-        username.c_str()
+    return storage_.loginOffline(
+        username,
+        password
     );
-
-    return false;
 }
 
 // ============================================================

@@ -47,6 +47,7 @@ void AppController::begin()
     }
 
     initCloudManager();
+    configureMybusAddress();
 
     // ---- Login ----
     Serial.println("[AUTH] Attempting to login...");
@@ -146,6 +147,25 @@ void AppController::initCloudManager()
         onCommandReceived(cmd);
     });
     Serial.println("[CLOUD] CloudManager initialized successfully");
+}
+
+// ✅ رفع باگ: mybusDeviceId_/mybusZoneId_ در CloudManager هیچ‌جا مقداردهی
+// نمی‌شدند (مگر از NVS بازیابی شده باشند)، پس performHandshake() همیشه
+// با "Invalid Device ID/Zone" شکست می‌خورد. این تابع مقدار پیش‌فرض را
+// -فقط در صورتی که هنوز پیکربندی نشده باشند- تنظیم می‌کند.
+void AppController::configureMybusAddress()
+{
+    if (cloudManager == nullptr) {
+        return;
+    }
+
+    if (cloudManager->getMybusDeviceId() == 0) {
+        cloudManager->setMybusDeviceId(MYBUS_DEVICE_ID);
+    }
+
+    if (cloudManager->getMybusZoneId() == 0) {
+        cloudManager->setMybusZoneId(MYBUS_ZONE_ID);
+    }
 }
 
 void AppController::initAudioHardware()
@@ -302,6 +322,27 @@ bool AppController::handleAudioRegistryWrite(uint16_t regAddr, const String& reg
 }
 
 // ============================================================
+// Curtain registry write
+//
+// ✅ رفع باگ: قبلاً ledState هیچ‌جا از روی رجیستر ست نمی‌شد، پس
+// نوشتن روی REG_CURTAIN_STATE هیچ اثری روی رله‌های شیفت‌رجیستر
+// نداشت. الان با نوشتن روی این رجیستر، ledState به‌روزرسانی می‌شود
+// و handleLedState() در حلقه‌ی اصلی آن را به رله‌ها اعمال می‌کند.
+// ============================================================
+
+bool AppController::handleCurtainRegistryWrite(uint16_t regAddr, const String& regVal)
+{
+    if (regAddr == REG_CURTAIN_STATE) {
+        int state = regVal.toInt();
+        ledState = (state != 0);
+        Serial.printf("[CURTAIN] State -> %s\n", ledState ? "OPEN" : "CLOSE");
+        return true;
+    }
+
+    return false;
+}
+
+// ============================================================
 // Command callback از CloudManager
 // ============================================================
 
@@ -355,11 +396,12 @@ void AppController::onCommandReceived(const JsonDocument& command)
         String regVal = command["RegVal"] | "";
         Serial.printf("[CMD] Set registry: 0x%04X = %s\n", regAddr, regVal.c_str());
 
-        bool handledLocally = handleAudioRegistryWrite(regAddr, regVal);
+        bool handledLocally = handleAudioRegistryWrite(regAddr, regVal)
+                            || handleCurtainRegistryWrite(regAddr, regVal);
         if (handledLocally) {
-            Serial.println("[CMD] ✅ Handled locally on audio hardware");
+            Serial.println("[CMD] ✅ Handled locally");
         } else {
-            Serial.println("[CMD] ℹ️ Register not part of Phase-1 (audio) map - ignored locally");
+            Serial.println("[CMD] ℹ️ Register not part of Phase-1 map - ignored locally");
         }
 
         if (cloudManager != nullptr && cloudManager->isSecureSessionEstablished()) {

@@ -980,6 +980,18 @@ bool hkdfSha256(
         return false;
     }
 
+    // ✅ رفع باگ بالقوه: بافر داخلی buffer[64 + 256 + 1] در پایین فرض
+    // می‌کند info حداکثر 256 بایت است، اما قبلاً هیچ چک صریحی روی
+    // infoLen وجود نداشت. اگر این تابع در آینده با یک info طولانی‌تر
+    // صدا زده می‌شد، این باعث buffer overflow روی استک می‌شد. الان
+    // به‌جای رفتار نامشخص، به‌صراحت شکست می‌خورد.
+    if (infoLen > 256) {
+        Serial.println(
+            "[CRYPTO] hkdfSha256: infoLen too large"
+        );
+        return false;
+    }
+
     // ============================================================
     // STEP 1: HKDF-Extract
     // PRK = HMAC-SHA256(salt, IKM)

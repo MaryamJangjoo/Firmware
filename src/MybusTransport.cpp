@@ -6,6 +6,7 @@
 
 #include "crypto.hpp"
 #include "mybus_frame.h"
+#include "mybus_registry.h"
 #include "mybus_protocol_constants.h"
 
 // ============================================================
@@ -271,6 +272,11 @@ bool MybusTransport::sendMybusBinaryFrame(
 
     // --------------------------------------------------------
     // Parse response
+    //
+    // ✅ رفع باگ: قبلاً deviceId و requestNumber به تابع دیکد پاس
+    // داده نمی‌شدند و اعتبارسنجی نمی‌شدند. الان مقادیر مورد انتظار
+    // (همان‌هایی که در این درخواست فرستادیم) پاس داده می‌شوند تا
+    // پاسخ‌های قدیمی/جابه‌جاشده رد شوند.
     // --------------------------------------------------------
 
     if (outResponse != nullptr &&
@@ -279,6 +285,8 @@ bool MybusTransport::sendMybusBinaryFrame(
         if (!decryptAndParseMybusResponse(
                 responseBytes.data(),
                 responseBytes.size(),
+                deviceId,
+                requestNumber,
                 *outResponse)) {
 
             Serial.println(
@@ -312,6 +320,8 @@ bool MybusTransport::sendMybusBinaryFrame(
 bool MybusTransport::decryptAndParseMybusResponse(
     const uint8_t* wireData,
     size_t wireLen,
+    uint8_t expectedDeviceId,
+    uint16_t expectedRequestNumber,
     JsonDocument& outDoc)
 {
     if (!session_.isEstablished()) {
@@ -451,6 +461,30 @@ bool MybusTransport::decryptAndParseMybusResponse(
         return false;
     }
 
+    // ✅ اضافه شد: اعتبارسنجی deviceId و requestNumber پاسخ، تا یک
+    // پاسخ قدیمی یا اشتباه که فقط interface/zone یکسان دارد پذیرفته
+    // نشود.
+
+    if (hdr.deviceId != expectedDeviceId) {
+        Serial.printf(
+            "[mYBUS] ❌ Response deviceId mismatch: got %u, expected %u\n",
+            hdr.deviceId,
+            expectedDeviceId
+        );
+
+        return false;
+    }
+
+    if (hdr.requestNumber != expectedRequestNumber) {
+        Serial.printf(
+            "[mYBUS] ❌ Response requestNumber mismatch: got %u, expected %u\n",
+            hdr.requestNumber,
+            expectedRequestNumber
+        );
+
+        return false;
+    }
+
     // --------------------------------------------------------
     // Response result
     // --------------------------------------------------------
@@ -511,6 +545,10 @@ bool MybusTransport::decryptAndParseMybusResponse(
 
 // ============================================================
 // Decode registry response
+//
+// ✅ رفع کد مرده: به‌جای دیکد دستی ((regAddr >> 8) & 0x0F)، از
+// decodeRegistryAddress() در mybus_registry.h استفاده می‌شود تا
+// منطق دیکد فقط در یک نقطه وجود داشته باشد و از واگرایی جلوگیری شود.
 // ============================================================
 
 void MybusTransport::decodeRegistryResponseValue(
@@ -560,10 +598,25 @@ void MybusTransport::decodeRegistryResponseValue(
         return;
     }
 
-    const MyBusDataType dataType =
-        static_cast<MyBusDataType>(
-            (regAddr >> 8) & 0x0F
-        );
+    bool regIsWrite = false;
+    bool regIsSystem = false;
+    bool regIsArray = false;
+    MyBusDataType dataType = DT_STRING;
+    uint8_t regShortAddr = 0;
+
+    decodeRegistryAddress(
+        regAddr,
+        regIsWrite,
+        regIsSystem,
+        regIsArray,
+        dataType,
+        regShortAddr
+    );
+
+    (void)regIsWrite;
+    (void)regIsSystem;
+    (void)regIsArray;
+    (void)regShortAddr;
 
     switch (dataType) {
 
@@ -693,6 +746,13 @@ void MybusTransport::decodeRegistryResponseValue(
 
 // ============================================================
 // Registry frame
+//
+// ✅ رفع باگ: isWrite قبلاً کاملاً نادیده گرفته می‌شد ((void)isWrite;)
+// و read/write فقط با خالی‌بودن regVal/valueLen در لایه‌ی بالاتر
+// تشخیص داده می‌شد. الان اینجا هم یک اعتبارسنجی سازگاری انجام
+// می‌شود: اگر isWrite=true باشد اما valueLen صفر باشد (یا برعکس)،
+// درخواست رد می‌شود تا ناسازگاری بین قصد فراخواننده و داده‌ی واقعی
+// زودتر مشخص شود.
 // ============================================================
 
 bool MybusTransport::sendRegistryFrame(
@@ -734,6 +794,22 @@ bool MybusTransport::sendRegistryFrame(
         return false;
     }
 
+    if (isWrite && valueLen == 0) {
+        Serial.println(
+            "[mYBUS] ❌ isWrite=true اما valueLen صفر است"
+        );
+
+        return false;
+    }
+
+    if (!isWrite && valueLen != 0) {
+        Serial.println(
+            "[mYBUS] ❌ isWrite=false اما valueLen غیرصفر است (Read نباید Value داشته باشد)"
+        );
+
+        return false;
+    }
+
     // --------------------------------------------------------
     // Current backend registry codec format:
     // [AddrLow][AddrHigh][Value...]
@@ -765,8 +841,6 @@ bool MybusTransport::sendRegistryFrame(
             valueLen
         );
     }
-
-    (void)isWrite;
 
     uint8_t flags =
         mybus_proto::FLAG_REQUEST;
@@ -813,6 +887,10 @@ bool MybusTransport::sendRegistryFrame(
 
 // ============================================================
 // sendMybusData
+//
+// ✅ رفع باگ: قبلاً سوییچ نوشتن مقدار برای DT_UINT32/DT_INT8/DT_INT16
+// هیچ case ای نداشت و به default (رشته‌ی خام) می‌افتاد، درحالی‌که
+// decodeRegistryResponseValue این تایپ‌ها را کامل پشتیبانی می‌کند.
 // ============================================================
 
 bool MybusTransport::sendMybusData(
@@ -888,6 +966,43 @@ bool MybusTransport::sendMybusData(
 
                 valueLen =
                     sizeof(float);
+
+                break;
+            }
+
+            case DT_UINT32: {
+                char* endPtr = nullptr;
+
+                const unsigned long num =
+                    strtoul(
+                        regVal.c_str(),
+                        &endPtr,
+                        10
+                    );
+
+                if (endPtr == regVal.c_str() ||
+                    (endPtr != nullptr &&
+                     *endPtr != '\0')) {
+
+                    Serial.printf(
+                        "[mYBUS] ❌ Invalid uint32: %s\n",
+                        regVal.c_str()
+                    );
+
+                    return false;
+                }
+
+                const uint32_t num32 =
+                    static_cast<uint32_t>(num);
+
+                memcpy(
+                    value,
+                    &num32,
+                    sizeof(num32)
+                );
+
+                valueLen =
+                    sizeof(num32);
 
                 break;
             }
@@ -968,6 +1083,45 @@ bool MybusTransport::sendMybusData(
                 break;
             }
 
+            case DT_INT16: {
+                char* endPtr = nullptr;
+
+                const long num =
+                    strtol(
+                        regVal.c_str(),
+                        &endPtr,
+                        10
+                    );
+
+                if (endPtr == regVal.c_str() ||
+                    (endPtr != nullptr &&
+                     *endPtr != '\0') ||
+                    num < -32768L ||
+                    num > 32767L) {
+
+                    Serial.printf(
+                        "[mYBUS] ❌ Invalid int16: %s\n",
+                        regVal.c_str()
+                    );
+
+                    return false;
+                }
+
+                const int16_t num16 =
+                    static_cast<int16_t>(num);
+
+                memcpy(
+                    value,
+                    &num16,
+                    sizeof(num16)
+                );
+
+                valueLen =
+                    sizeof(num16);
+
+                break;
+            }
+
             case DT_UINT8: {
                 char* endPtr = nullptr;
 
@@ -994,6 +1148,40 @@ bool MybusTransport::sendMybusData(
 
                 value[0] =
                     static_cast<uint8_t>(num);
+
+                valueLen = 1;
+
+                break;
+            }
+
+            case DT_INT8: {
+                char* endPtr = nullptr;
+
+                const long num =
+                    strtol(
+                        regVal.c_str(),
+                        &endPtr,
+                        10
+                    );
+
+                if (endPtr == regVal.c_str() ||
+                    (endPtr != nullptr &&
+                     *endPtr != '\0') ||
+                    num < -128L ||
+                    num > 127L) {
+
+                    Serial.printf(
+                        "[mYBUS] ❌ Invalid int8: %s\n",
+                        regVal.c_str()
+                    );
+
+                    return false;
+                }
+
+                value[0] =
+                    static_cast<uint8_t>(
+                        static_cast<int8_t>(num)
+                    );
 
                 valueLen = 1;
 
