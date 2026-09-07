@@ -142,7 +142,7 @@ void AppController::initCloudManager()
 {
     Serial.println("[CLOUD] Initializing CloudManager...");
     cloudManager = new CloudManager();
-    cloudManager->setApiBaseUrl("http://ip:3000");
+    cloudManager->setApiBaseUrl("http://192.168.88.198:3000");
     cloudManager->onCommand([this](const JsonDocument& cmd) {
         onCommandReceived(cmd);
     });

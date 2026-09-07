@@ -46,7 +46,7 @@ void setup()
     updater.setup(&server);
 
     WiFi.mode(WIFI_STA);
-    WiFi.begin("WIFI", "WIFI_PASS");
+    WiFi.begin("megafaYakand8202", "megafaY@kand*@)@");
     Serial.print("\r\nConnect to WiFi ..");
     while (WiFi.status() != WL_CONNECTED)
     {
