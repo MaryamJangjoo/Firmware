@@ -75,6 +75,16 @@ CloudManager::CloudManager()
     // --------------------------------------------------------
     // String Device ID
     // Used for JWT / backend identity
+    //
+    // ⚠️ نکته‌ی مهم: در لحظه‌ای که mybusSession_ در init-list بالا
+    // ساخته شد، deviceId_ هنوز مقدار خالی/پیش‌فرض داشت (چون اعضا به
+    // ترتیب اعلان در .h ساخته می‌شوند، نه به ترتیب init-list، و
+    // deviceId_ در .h قبل از mybusSession_ اعلان شده ولی هنوز اینجا
+    // در بدنه‌ی سازنده مقداردهی نشده بود). چون MybusSession::deviceId_
+    // یک کپی است نه رفرنس، این یعنی MybusSession همیشه deviceId خالی
+    // داشت و هندشیک با خطای Forbidden رد می‌شد.
+    // ✅ رفع باگ: بلافاصله بعد از تعیین مقدار نهایی deviceId_، آن را
+    // صراحتاً به mybusSession_ هم منتقل می‌کنیم.
     // --------------------------------------------------------
 
     deviceId_ = generateDeviceId();
@@ -89,6 +99,8 @@ CloudManager::CloudManager()
         deviceId_ = storedDeviceId;
     }
 
+    mybusSession_.setDeviceId(deviceId_); // ✅ sync اول
+
     // --------------------------------------------------------
     // mYBUS numeric address
     //
@@ -99,11 +111,6 @@ CloudManager::CloudManager()
     // device.mybusZoneId
     //
     // on backend.
-    //
-    // ⚠️ اگر مقدار ذخیره‌شده در Preferences نباشد، این‌ها روی 0
-    // می‌مانند. تنظیم مقدار اولیه باید توسط لایه‌ی بالادستی
-    // (مثلاً AppController::begin) از طریق setMybusDeviceId()/
-    // setMybusZoneId() انجام شود - نگاه کنید به AppController.cpp.
     // --------------------------------------------------------
 
     mybusDeviceId_ =
@@ -132,10 +139,16 @@ CloudManager::CloudManager()
 
     // --------------------------------------------------------
     // JWT
+    //
+    // ⚠️ CloudAuth::loadToken() می‌تواند deviceId_ را (چون رفرنس است)
+    // از preferences دوباره بازنویسی کند. برای اطمینان، بعد از این
+    // فراخوانی هم mybusSession_ را دوباره sync می‌کنیم.
     // --------------------------------------------------------
 
     jwtToken_ =
         auth_.loadToken();
+
+    mybusSession_.setDeviceId(deviceId_); // ✅ sync دوباره بعد از loadToken
 
     // --------------------------------------------------------
     // Device ECDH keypair
@@ -148,7 +161,10 @@ CloudManager::CloudManager()
     }
 
     // --------------------------------------------------------
-    // Filesystem / Users / Site Info
+    // Filesystem / Users
+    //
+    // ✅ site_info.json دیگر لازم نیست: فقط users.json (برای لاگین
+    // آفلاین) ساخته/خوانده می‌شود.
     // --------------------------------------------------------
 
     if (!storage_.init()) {
@@ -160,13 +176,6 @@ CloudManager::CloudManager()
     } else {
 
         storage_.createDefaultUsersFile();
-        storage_.createDefaultSiteInfoFile();
-
-        SiteInfo info;
-
-        if (storage_.loadSiteInfo(info)) {
-            siteId_ = info.siteId;
-        }
     }
 
     // --------------------------------------------------------
@@ -277,11 +286,22 @@ bool CloudManager::loginUser(
     const String& p,
     const String& deviceId)
 {
-    return auth_.loginUser(
-        u,
-        p,
-        deviceId
-    );
+    const bool ok =
+        auth_.loginUser(
+            u,
+            p,
+            deviceId
+        );
+
+    // ✅ لاگین می‌تواند deviceId_ را از پاسخ بک‌اند (responseDeviceId)
+    // تغییر دهد؛ چون CloudAuth::deviceId_ رفرنس است، خود
+    // CloudManager::deviceId_ هم عوض می‌شود. باید mybusSession_ را
+    // دوباره sync کنیم تا هندشیک بعدی از deviceId درست استفاده کند.
+    if (ok) {
+        mybusSession_.setDeviceId(deviceId_);
+    }
+
+    return ok;
 }
 
 bool CloudManager::refreshToken()
@@ -296,12 +316,6 @@ bool CloudManager::isLoggedIn() const
 
 // ============================================================
 // Offline login
-//
-// ✅ رفع تکرار کد: قبلاً این متد کل منطق بررسی users.json را از نو
-// پیاده‌سازی می‌کرد که دقیقاً با CloudStorage::loginOffline /
-// CloudStorage::verifyUserPassword یکسان بود. حالا مستقیماً به
-// CloudStorage (که این کلاس همین الان به آن دسترسی دارد) تفویض
-// می‌شود تا فقط یک نسخه از این منطق در کدبیس وجود داشته باشد.
 // ============================================================
 
 bool CloudManager::loginOffline(
@@ -349,6 +363,13 @@ bool CloudManager::performHandshake()
 
         return false;
     }
+
+    // ✅ sync نهایی، درست قبل از هندشیک، به‌عنوان شبکه‌ی ایمنی آخر
+    // (ارزان است و تضمین می‌کند مقدار همیشه به‌روز باشد، حتی اگر
+    // مسیر دیگری deviceId_ را تغییر داده باشد).
+    mybusSession_.setDeviceId(
+        deviceId_
+    );
 
     // Keep session configuration synchronized
     mybusSession_.setInterfaceId(
@@ -426,11 +447,6 @@ bool CloudManager::sendRegistryFrame(
         return false;
     }
 
-    // --------------------------------------------------------
-    // If caller did not explicitly provide a bus Device ID,
-    // use this ESP32's configured numeric mYBUS Device ID.
-    // --------------------------------------------------------
-
     if (busDeviceId == 0) {
         busDeviceId =
             mybusDeviceId_;
@@ -456,7 +472,6 @@ bool CloudManager::sendRegistryFrame(
         return false;
     }
 
-    // Keep Session synchronized
     mybusSession_.setInterfaceId(
         mybus_proto::INTERFACE_WIFI
     );
@@ -625,6 +640,12 @@ void CloudManager::setDeviceId(
 
     preferences_.putString(
         "deviceId",
+        deviceId_
+    );
+
+    // ✅ هر جا از بیرون deviceId عوض شود (مثلاً برای اجبار به یک ID
+    // قدیمی/خاص)، باید mybusSession_ هم بلافاصله sync شود.
+    mybusSession_.setDeviceId(
         deviceId_
     );
 

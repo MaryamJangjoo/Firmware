@@ -36,8 +36,9 @@ void AppController::begin()
     Serial.println("System Starting ....");
 
     pinMode(PIN_I2S_PDN, OUTPUT);
-    digitalWrite(PIN_I2S_PDN, LOW);
-    Serial.println("PDN pin set LOW (TAS5805M active)");
+    digitalWrite(PIN_I2S_PDN, HIGH);   
+    delay(10);                         
+    Serial.println("PDN pin set HIGH (TAS5805M active)");
 
     if (!connectToWiFi()) {
         Serial.println("[ERROR] WiFi connection failed. Retrying in 5 seconds...");
@@ -104,7 +105,7 @@ void AppController::handle()
     handleWiFiReconnect();
     handleLedState();
 
-    delay(100);
+    // delay(100);
 }
 
 // ============================================================
@@ -175,7 +176,7 @@ void AppController::initAudioHardware()
     if (amp.init() != ESP_OK) {
         Serial.println("Failed to initialize TAS5805M");
     } else {
-        uint8_t volume = 60;
+        uint8_t volume = 70;
         if (tas5805m_set_volume_pct(volume) != ESP_OK) {
             ESP_LOGE("TAS5805M", "Failed to set volume");
         }

@@ -38,7 +38,7 @@ private:
 
     // ---- WiFi ----
     const char* WIFI_SSID     = "megafaYakand8202";
-    const char* WIFI_PASSWORD = "megafaY@kand*@)@-PASS";
+    const char* WIFI_PASSWORD = "megafaY@kand*@)@";
 
     // ---- mYBUS numeric address ----
     // ⚠️ این مقادیر باید دقیقاً با device.mybusDeviceId و

@@ -68,6 +68,17 @@ public:
         zone_ = zone;
     }
 
+    // ✅ رفع باگ: deviceId_ در این کلاس یک کپی مستقل است (نه رفرنس).
+    // اگر CloudManager::deviceId_ بعداً تغییر کند (مثلاً بعد از لاگین
+    // یا preferences)، این کپی به‌طور خودکار sync نمی‌شود. این متد
+    // باید صراحتاً بعد از هر تغییر deviceId در CloudManager صدا زده شود
+    // (نگاه کنید به CloudManager.cpp: constructor، loginUser، performHandshake،
+    // setDeviceId).
+    void setDeviceId(const String& deviceId)
+    {
+        deviceId_ = deviceId;
+    }
+
 private:
     String createNonce();
 

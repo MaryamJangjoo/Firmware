@@ -1,0 +1,14 @@
+{
+  "users": [
+    {
+      "username": "tes29t_operator",
+      "passwordHash": "SecurePassword@2026",
+      "publicKey": "",
+      "role": "admin",
+      "lastLogin": 0
+    }
+  ],
+  "totalUsers": 1,
+  "updatedAt": 0,
+  "version": 0
+}
