@@ -2,7 +2,7 @@
   "users": [
     {
       "username": "tes29t_operator",
-      "passwordHash": "SecurePassword@2026",
+      "passwordHash": "SecurePassword@20266",
       "publicKey": "",
       "role": "admin",
       "lastLogin": 0

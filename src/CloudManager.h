@@ -14,6 +14,7 @@
 
 class CloudManager {
 public:
+
     CloudManager();
     ~CloudManager();
 
@@ -88,8 +89,19 @@ public:
         JsonDocument& data
     );
 
+    // General command callback.
     void onCommand(
         CloudWebSocketServer::CommandCallback cb
+    );
+
+    // Local registry read callback.
+    void onLocalRegistryRead(
+        CloudWebSocketServer::LocalRegistryReadCallback cb
+    );
+
+    // Local register -> physical mYBUS forwarding decision.
+    void onShouldSkipMybusWrite(
+        CloudWebSocketServer::ShouldSkipMybusWriteCallback cb
     );
 
     // ========================================================
@@ -117,7 +129,7 @@ private:
     // ========================================================
 
     String apiBaseUrl_ =
-        "http://192.168.88.198:3000";
+        "http://192.168.88.98:3000";
 
     // JWT / backend identity
     String deviceId_;

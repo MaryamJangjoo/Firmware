@@ -567,11 +567,29 @@ bool CloudManager::sendRealtimeData(
 {
     return wsServer_.sendRealtimeData(data);
 }
+// ============================================================
+// WebSocket callbacks
+// ============================================================
 
 void CloudManager::onCommand(
-    CloudWebSocketServer::CommandCallback cb)
+    CloudWebSocketServer::CommandCallback cb
+)
 {
     wsServer_.onCommand(cb);
+}
+
+void CloudManager::onLocalRegistryRead(
+    CloudWebSocketServer::LocalRegistryReadCallback cb
+)
+{
+    wsServer_.onLocalRegistryRead(cb);
+}
+
+void CloudManager::onShouldSkipMybusWrite(
+    CloudWebSocketServer::ShouldSkipMybusWriteCallback cb
+)
+{
+    wsServer_.onShouldSkipMybusWrite(cb);
 }
 
 // ============================================================

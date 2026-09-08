@@ -543,13 +543,6 @@ bool MybusTransport::decryptAndParseMybusResponse(
     return true;
 }
 
-// ============================================================
-// Decode registry response
-//
-// ✅ رفع کد مرده: به‌جای دیکد دستی ((regAddr >> 8) & 0x0F)، از
-// decodeRegistryAddress() در mybus_registry.h استفاده می‌شود تا
-// منطق دیکد فقط در یک نقطه وجود داشته باشد و از واگرایی جلوگیری شود.
-// ============================================================
 
 void MybusTransport::decodeRegistryResponseValue(
     JsonDocument& doc,

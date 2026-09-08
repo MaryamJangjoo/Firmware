@@ -20,7 +20,6 @@ AppController::AppController()
     s_instance = this;
 }
 
-
 void AppController::begin()
 {
     pinMode(PIN_LED_1, OUTPUT);
@@ -38,9 +37,6 @@ void AppController::begin()
     delay(10);
     Serial.println("PDN pin set HIGH (TAS5805M active)");
 
-    // ✅ رجیسترهای محلی (فعلاً فقط Audio) باید قبل از هر جایی که
-    // ممکنه GET_REGISTRY/SET_REGISTRY بیاد (یعنی قبل از WebSocket)
-    // بایند شده باشن.
     registerLocalRegisters();
 
     if (!connectToWiFi()) {
@@ -55,19 +51,18 @@ void AppController::begin()
 
     Serial.println("[AUTH] Attempting to login...");
     bool loginSuccess = cloudManager->loginUser(
-        "tes29t_operator", "SecurePassword@2026", cloudManager->getDeviceId());
+        "tes29t_operator", "SecurePassword@20266", cloudManager->getDeviceId());
 
     if (loginSuccess) {
         Serial.println("[AUTH] ✅ Login successful!");
     } else {
         Serial.println("[AUTH] ❌ Login failed, trying offline...");
-        if (cloudManager->loginOffline("tes29t_operator", "SecurePassword@2026")) {
+        if (cloudManager->loginOffline("tes29t_operator", "SecurePassword@20266")) {
             Serial.println("[AUTH] ✅ Offline login successful!");
         } else {
             Serial.println("[AUTH] ❌ Offline login failed!");
         }
     }
-
 
     if (cloudManager->isLoggedIn()) {
         if (cloudManager->isSecureSessionEstablished()) {
@@ -94,7 +89,6 @@ void AppController::begin()
     Serial.println();
 }
 
-
 void AppController::handle()
 {
     if (cloudManager != nullptr) {
@@ -104,8 +98,10 @@ void AppController::handle()
     handleWiFiReconnect();
     handleLedState();
     tickAudioSleepTimer();
-}
 
+    // ✅ پردازش دستورات Serial
+    handleSerialCommands();
+}
 
 bool AppController::connectToWiFi()
 {
@@ -137,11 +133,26 @@ bool AppController::connectToWiFi()
 void AppController::initCloudManager()
 {
     Serial.println("[CLOUD] Initializing CloudManager...");
+
     cloudManager = new CloudManager();
-    cloudManager->setApiBaseUrl("http://192.168.88.198:3000");
+    cloudManager->setApiBaseUrl("http://192.168.88.98:3000");
+
     cloudManager->onCommand([this](const JsonDocument& cmd) {
         onCommandReceived(cmd);
     });
+
+    cloudManager->onLocalRegistryRead([this](uint16_t addr, JsonDocument& out) {
+        if (!localRegisters_.isLocal(addr)) {
+            return false;
+        }
+        return localRegisters_.readValueToJson(addr, out);
+    });
+
+    cloudManager->onShouldSkipMybusWrite([this](uint16_t addr) {
+        return localRegisters_.isLocal(addr) &&
+               !localRegisters_.shouldMirrorToCloud(addr);
+    });
+
     Serial.println("[CLOUD] CloudManager initialized successfully");
 }
 
@@ -167,14 +178,16 @@ void AppController::initAudioHardware()
     if (amp.init() != ESP_OK) {
         Serial.println("Failed to initialize TAS5805M");
     } else {
-        uint8_t volume = 70;
-        if (tas5805m_set_volume_pct(volume) != ESP_OK) {
+        if (tas5805m_set_volume_pct(audioVolumeRaw_) != ESP_OK) {
             ESP_LOGE("TAS5805M", "Failed to set volume");
         }
-        if (tas5805m_get_volume_pct(&volume) != ESP_OK) {
+
+        uint8_t actualVolume = 0;
+        if (tas5805m_get_volume_pct(&actualVolume) != ESP_OK) {
             ESP_LOGE("TAS5805M", "Failed to get volume");
         } else {
-            ESP_LOGI("TAS5805M", "Current volume: %d", volume);
+            audioVolumeRaw_ = actualVolume;
+            ESP_LOGI("TAS5805M", "Current volume: %d", audioVolumeRaw_);
         }
     }
 
@@ -184,7 +197,6 @@ void AppController::initAudioHardware()
     bta.volume(1.0);
     bta.setSinkCallback(&AppController::btDataTrampoline);
 }
-
 
 void AppController::handleWiFiReconnect()
 {
@@ -209,7 +221,6 @@ void AppController::handleWiFiReconnect()
 
     if (now - wifiLastAttemptMs_ >= WIFI_RECONNECT_ATTEMPT_INTERVAL_MS) {
         wifiLastAttemptMs_ = now;
-    
     }
     if (now - wifiReconnectStartMs_ >= WIFI_RECONNECT_TIMEOUT_MS) {
         Serial.println("[WiFi] ❌ Reconnect timeout, will retry on next loop pass");
@@ -224,7 +235,6 @@ void AppController::handleLedState()
         ledState ? setCurtainOn() : setCurtainOff();
     }
 }
-
 
 void AppController::setCurtainOn()
 {
@@ -241,7 +251,6 @@ void AppController::setCurtainOff()
     shiftOut(PIN_SR_DATA, PIN_SR_CLOCK, LSBFIRST, 0);
     digitalWrite(PIN_SR_LATCH, HIGH);
 }
-
 
 void AppController::visualizeAudio(const uint8_t* data, uint32_t len)
 {
@@ -278,21 +287,18 @@ void AppController::btDataTrampoline(const uint8_t* data, uint32_t len)
     }
 }
 
-
 // ============================================================
 // Local register bindings — Audio
-//
-// هر آدرس مستقیماً به متغیر عضو مربوطه bind می‌شود؛ نوشتن روی
-// رجیستر یعنی نوشتن روی همان حافظه‌ای که ماژول صوتی استفاده
-// می‌کند، نه یک کپی جدا که باید دستی sync شود.
 // ============================================================
 
 void AppController::registerAudioRegisters()
 {
+    // ============================================================
+    // 1. Mode - 0x8101 (u8, R/W)
+    // ============================================================
     localRegisters_.bind({
         REG_AUDIO_MODE, DT_UINT8, &audioModeRaw_, sizeof(audioModeRaw_),
-        /*writable*/ true, /*mirrorToCloud*/ false, /*isString*/ false,
-        this,
+        true, false, false, this,
         [](void* ctx, void* ptr) {
             auto* self = static_cast<AppController*>(ctx);
             uint8_t mode = *static_cast<uint8_t*>(ptr);
@@ -306,6 +312,9 @@ void AppController::registerAudioRegisters()
         nullptr
     });
 
+    // ============================================================
+    // 2. Control - 0x8102 (u8, R/W)
+    // ============================================================
     localRegisters_.bind({
         REG_AUDIO_CONTROL, DT_UINT8, &audioControlRaw_, sizeof(audioControlRaw_),
         true, false, false, this,
@@ -329,6 +338,9 @@ void AppController::registerAudioRegisters()
         nullptr
     });
 
+    // ============================================================
+    // 3. Sleep Timer - 0x8221 (u16, R/W)
+    // ============================================================
     localRegisters_.bind({
         REG_AUDIO_SLEEP_TIMER, DT_UINT16, &audioSleepTimerRaw_, sizeof(audioSleepTimerRaw_),
         true, false, false, this,
@@ -340,6 +352,9 @@ void AppController::registerAudioRegisters()
         nullptr
     });
 
+    // ============================================================
+    // 4. Station - 0x8222 (u16, R/W)
+    // ============================================================
     localRegisters_.bind({
         REG_AUDIO_STATION, DT_UINT16, &audioStationRaw_, sizeof(audioStationRaw_),
         true, false, false, this,
@@ -350,18 +365,25 @@ void AppController::registerAudioRegisters()
         nullptr
     });
 
+    // ============================================================
+    // 5. Volume - 0x8103 (u8, R/W)
+    // ============================================================
     localRegisters_.bind({
         REG_AUDIO_VOLUME, DT_UINT8, &audioVolumeRaw_, sizeof(audioVolumeRaw_),
         true, false, false, this,
         [](void*, void* ptr) {
-            uint8_t* vol = static_cast<uint8_t*>(ptr);
-            *vol = constrain(*vol, (uint8_t)0, (uint8_t)124);
-            esp_err_t ret = tas5805m_set_volume_pct(*vol);
-            Serial.printf("[AUDIO] Volume -> %u (%s)\n", *vol, ret == ESP_OK ? "OK" : "FAIL");
+            uint8_t requested = *static_cast<uint8_t*>(ptr);
+            uint8_t clamped = constrain(requested, (uint8_t)0, (uint8_t)124);
+            esp_err_t ret = tas5805m_set_volume_pct(clamped);
+            Serial.printf("[AUDIO] Volume -> %u (requested %u, %s)\n",
+                          clamped, requested, ret == ESP_OK ? "OK" : "FAIL");
         },
         nullptr
     });
 
+    // ============================================================
+    // 6. Bass - 0x8104 (u8, R/W)
+    // ============================================================
     localRegisters_.bind({
         REG_AUDIO_BASS, DT_UINT8, &audioBassRaw_, sizeof(audioBassRaw_),
         true, false, false, this,
@@ -372,34 +394,17 @@ void AppController::registerAudioRegisters()
         nullptr
     });
 
-    localRegisters_.bind({
-        REG_AUDIO_TREBLE, DT_UINT8, &audioTrebleRaw_, sizeof(audioTrebleRaw_),
-        true, false, false, this,
-        [](void*, void* ptr) {
-            Serial.printf("[AUDIO] Treble -> %u (⚠️ EQ hardware not wired, value stored only)\n",
-                          *static_cast<uint8_t*>(ptr));
-        },
-        nullptr
-    });
-
-    localRegisters_.bind({
-        REG_AUDIO_EQ, DT_UINT8, &audioEqRaw_, sizeof(audioEqRaw_),
-        true, false, false, this,
-        [](void*, void* ptr) {
-            Serial.printf("[AUDIO] EQ preset -> %u (⚠️ EQ hardware not wired, value stored only)\n",
-                          *static_cast<uint8_t*>(ptr));
-        },
-        nullptr
-    });
-
-    // Title/Artist: read-only از دید کلاود. منبع واقعی‌شون متادیتای
-    // بلوتوثه که فعلاً از btAudio دریافت نمی‌شه (TODO - نیاز به
-    // بررسی callback متادیتای کتابخونه). فعلاً فقط رشته‌ی خالی دارن.
+    // ============================================================
+    // 7. Title - 0x0800 (string, R) ⚠️ اصلاح‌شده از 0x0700
+    // ============================================================
     localRegisters_.bind({
         REG_AUDIO_TITLE, DT_STRING, &audioTitle_, 0,
         false, false, true, this, nullptr, nullptr
     });
 
+    // ============================================================
+    // 8. Artist - 0x0801 (string, R) ⚠️ اصلاح‌شده از 0x0701
+    // ============================================================
     localRegisters_.bind({
         REG_AUDIO_ARTIST, DT_STRING, &audioArtist_, 0,
         false, false, true, this, nullptr, nullptr
@@ -409,7 +414,7 @@ void AppController::registerAudioRegisters()
 void AppController::registerLocalRegisters()
 {
     registerAudioRegisters();
-    // بعداً: Curtain / RGB / HVAC هم به همین صورت اضافه می‌شن.
+    // بعداً: Curtain / RGB / HVAC
 }
 
 void AppController::tickAudioSleepTimer()
@@ -417,16 +422,256 @@ void AppController::tickAudioSleepTimer()
     if (audioSleepTimerRaw_ == 0) return;
 
     const unsigned long now = millis();
-    if (now - lastSleepTimerTickMs_ < 60000UL) return; // هر یک دقیقه
+    if (now - lastSleepTimerTickMs_ < 60000UL) return;
 
     lastSleepTimerTickMs_ = now;
     audioSleepTimerRaw_--;
 
     if (audioSleepTimerRaw_ == 0) {
-        Serial.println("[AUDIO] ⏰ Sleep timer expired (⚠️ actual stop not wired - verify btAudio API)");
+        Serial.println("[AUDIO] ⏰ Sleep timer expired");
     }
 }
 
+// ============================================================
+// Serial Commands Handler
+// ============================================================
+
+void AppController::handleSerialCommands()
+{
+    if (!Serial.available()) return;
+
+    String cmd = Serial.readStringUntil('\n');
+    cmd.trim();
+
+    if (cmd.isEmpty()) return;
+
+    // ---- READ COMMANDS ----
+
+    if (cmd == "getvol" || cmd == "getvolume") {
+        JsonDocument doc;
+        if (localRegisters_.readValueToJson(REG_AUDIO_VOLUME, doc)) {
+            Serial.printf("[VOLUME] Current: %s\n", doc["value"].as<String>().c_str());
+        } else {
+            Serial.println("[VOLUME] ❌ Read failed");
+        }
+        return;
+    }
+
+    if (cmd == "getbass") {
+        JsonDocument doc;
+        if (localRegisters_.readValueToJson(REG_AUDIO_BASS, doc)) {
+            Serial.printf("[BASS] Current: %s\n", doc["value"].as<String>().c_str());
+        } else {
+            Serial.println("[BASS] ❌ Read failed");
+        }
+        return;
+    }
+
+
+    if (cmd == "getmode") {
+        JsonDocument doc;
+        if (localRegisters_.readValueToJson(REG_AUDIO_MODE, doc)) {
+            int mode = doc["value"].as<int>();
+            Serial.printf("[MODE] Current: %d (%s)\n", mode, mode == 0 ? "Bluetooth" : "Radio");
+        } else {
+            Serial.println("[MODE] ❌ Read failed");
+        }
+        return;
+    }
+
+    if (cmd == "gettitle") {
+        JsonDocument doc;
+        if (localRegisters_.readValueToJson(REG_AUDIO_TITLE, doc)) {
+            Serial.printf("[TITLE] %s\n", doc["value"].as<String>().c_str());
+        } else {
+            Serial.println("[TITLE] ❌ Read failed");
+        }
+        return;
+    }
+
+    if (cmd == "getartist") {
+        JsonDocument doc;
+        if (localRegisters_.readValueToJson(REG_AUDIO_ARTIST, doc)) {
+            Serial.printf("[ARTIST] %s\n", doc["value"].as<String>().c_str());
+        } else {
+            Serial.println("[ARTIST] ❌ Read failed");
+        }
+        return;
+    }
+
+    if (cmd == "getsleep") {
+        JsonDocument doc;
+        if (localRegisters_.readValueToJson(REG_AUDIO_SLEEP_TIMER, doc)) {
+            Serial.printf("[SLEEP TIMER] %s minutes\n", doc["value"].as<String>().c_str());
+        } else {
+            Serial.println("[SLEEP TIMER] ❌ Read failed");
+        }
+        return;
+    }
+
+    if (cmd == "getstation") {
+        JsonDocument doc;
+        if (localRegisters_.readValueToJson(REG_AUDIO_STATION, doc)) {
+            Serial.printf("[STATION] %s\n", doc["value"].as<String>().c_str());
+        } else {
+            Serial.println("[STATION] ❌ Read failed");
+        }
+        return;
+    }
+
+    // ---- WRITE COMMANDS ----
+
+    if (cmd.startsWith("setvol ")) {
+        int vol = cmd.substring(7).toInt();
+        vol = constrain(vol, 0, 100);
+        if (localRegisters_.writeValueFromString(REG_AUDIO_VOLUME, String(vol))) {
+            Serial.printf("[VOLUME] Set to %d ✅\n", vol);
+        } else {
+            Serial.println("[VOLUME] ❌ Write failed");
+        }
+        return;
+    }
+
+    if (cmd.startsWith("setbass ")) {
+        int val = cmd.substring(8).toInt();
+        val = constrain(val, 0, 20);
+        if (localRegisters_.writeValueFromString(REG_AUDIO_BASS, String(val))) {
+            Serial.printf("[BASS] Set to %d ✅\n", val);
+        } else {
+            Serial.println("[BASS] ❌ Write failed");
+        }
+        return;
+    }
+
+
+    if (cmd.startsWith("setmode ")) {
+        int val = cmd.substring(8).toInt();
+        val = constrain(val, 0, 1);
+        if (localRegisters_.writeValueFromString(REG_AUDIO_MODE, String(val))) {
+            Serial.printf("[MODE] Set to %d (%s) ✅\n", val, val == 0 ? "Bluetooth" : "Radio");
+        } else {
+            Serial.println("[MODE] ❌ Write failed");
+        }
+        return;
+    }
+
+    if (cmd.startsWith("setsleep ")) {
+        int val = cmd.substring(9).toInt();
+        val = constrain(val, 0, 65535);
+        if (localRegisters_.writeValueFromString(REG_AUDIO_SLEEP_TIMER, String(val))) {
+            Serial.printf("[SLEEP TIMER] Set to %d minutes ✅\n", val);
+        } else {
+            Serial.println("[SLEEP TIMER] ❌ Write failed");
+        }
+        return;
+    }
+
+    if (cmd.startsWith("setstation ")) {
+        int val = cmd.substring(11).toInt();
+        val = constrain(val, 0, 65535);
+        if (localRegisters_.writeValueFromString(REG_AUDIO_STATION, String(val))) {
+            Serial.printf("[STATION] Set to %d ✅\n", val);
+        } else {
+            Serial.println("[STATION] ❌ Write failed");
+        }
+        return;
+    }
+
+    if (cmd.startsWith("settitle ")) {
+        String title = cmd.substring(9);
+        audioTitle_ = title;
+        Serial.printf("[TITLE] Set to: %s ✅\n", title.c_str());
+        return;
+    }
+
+    if (cmd.startsWith("setartist ")) {
+        String artist = cmd.substring(10);
+        audioArtist_ = artist;
+        Serial.printf("[ARTIST] Set to: %s ✅\n", artist.c_str());
+        return;
+    }
+
+    // ---- TEST COMMANDS ----
+
+    if (cmd == "testall") {
+        testAllAudioRegisters();
+        return;
+    }
+
+    if (cmd == "help" || cmd == "?") {
+        printHelp();
+        return;
+    }
+
+    Serial.printf("[CMD] Unknown: '%s' (type 'help' for list)\n", cmd.c_str());
+}
+
+void AppController::testAllAudioRegisters()
+{
+    Serial.println("\n========== TESTING AUDIO REGISTERS ==========");
+
+    struct TestEntry {
+        uint16_t addr;
+        const char* name;
+    };
+
+    TestEntry entries[] = {
+        {REG_AUDIO_MODE, "Mode"},
+        {REG_AUDIO_CONTROL, "Control"},
+        {REG_AUDIO_SLEEP_TIMER, "Sleep Timer"},
+        {REG_AUDIO_STATION, "Station"},
+        {REG_AUDIO_VOLUME, "Volume"},
+        {REG_AUDIO_BASS, "Bass"},
+        {REG_AUDIO_TITLE, "Title"},
+        {REG_AUDIO_ARTIST, "Artist"}
+    };
+
+    for (auto& entry : entries) {
+        JsonDocument doc;
+        if (localRegisters_.readValueToJson(entry.addr, doc)) {
+            Serial.printf("[TEST] %s (0x%04X) -> %s\n",
+                          entry.name, entry.addr,
+                          doc["value"].as<String>().c_str());
+        } else {
+            Serial.printf("[TEST] %s (0x%04X) -> ❌ READ FAILED\n",
+                          entry.name, entry.addr);
+        }
+    }
+
+    Serial.println("=============================================\n");
+}
+
+void AppController::printHelp()
+{
+    Serial.println("\n========== AUDIO REGISTER COMMANDS ==========");
+    Serial.println("");
+    Serial.println("📖 READ:");
+    Serial.println("  getvol       - Get Volume");
+    Serial.println("  getbass      - Get Bass");
+    Serial.println("  gettreble    - Get Treble");
+    Serial.println("  geteq        - Get EQ");
+    Serial.println("  getmode      - Get Mode");
+    Serial.println("  gettitle     - Get Title");
+    Serial.println("  getartist    - Get Artist");
+    Serial.println("  getsleep     - Get Sleep Timer");
+    Serial.println("  getstation   - Get Station");
+    Serial.println("");
+    Serial.println("✍️ WRITE:");
+    Serial.println("  setvol 0-100       - Set Volume");
+    Serial.println("  setbass 0-20       - Set Bass");
+    Serial.println("  settreble 0-20     - Set Treble");
+    Serial.println("  seteq 0-4          - Set EQ (0=Off,1=Rock,2=Jazz,3=Pop,4=Classical)");
+    Serial.println("  setmode 0-1        - Set Mode (0=Bluetooth, 1=Radio)");
+    Serial.println("  settitle <text>    - Set Title");
+    Serial.println("  setartist <text>   - Set Artist");
+    Serial.println("  setsleep 0-65535   - Set Sleep Timer (minutes)");
+    Serial.println("  setstation 0-65535 - Set Station");
+    Serial.println("");
+    Serial.println("🧪 TEST:");
+    Serial.println("  testall    - Read all registers");
+    Serial.println("  help, ?    - Show this help");
+    Serial.println("=============================================\n");
+}
 
 void AppController::onCommandReceived(const JsonDocument& command)
 {
@@ -447,8 +692,6 @@ void AppController::onCommandReceived(const JsonDocument& command)
         uint16_t regAddr = command["RegAdd"] | 0;
         Serial.printf("[CMD] Get registry: 0x%04X\n", regAddr);
 
-        // ✅ رجیسترهای محلی (فعلاً Audio) مستقیم از حافظه خونده
-        // می‌شن - نیازی به رفتن سراغ mYBUS نیست.
         if (localRegisters_.isLocal(regAddr)) {
             JsonDocument response;
             if (localRegisters_.readValueToJson(regAddr, response)) {
@@ -502,17 +745,12 @@ void AppController::onCommandReceived(const JsonDocument& command)
 
         bool handledLocally = false;
 
-        // ✅ Audio (و هر رجیستر دیگری که در آینده register بشه) از
-        // طریق LocalRegisterMap نوشته می‌شه.
         if (localRegisters_.isLocal(regAddr)) {
             handledLocally = localRegisters_.writeValueFromString(regAddr, regVal);
             Serial.println(handledLocally
                 ? "[CMD] ✅ Handled locally (register map)"
                 : "[CMD] ❌ Local register write failed");
-        }
-        // ⚠️ Curtain هنوز به LocalRegisterMap منتقل نشده - مسیر قدیمی
-        // موقتاً همین‌جا inline نگه داشته شده تا رفتار قبلی حفظ بشه.
-        else if (regAddr == REG_CURTAIN_STATE) {
+        } else if (regAddr == REG_CURTAIN_STATE) {
             int state = regVal.toInt();
             ledState = (state != 0);
             Serial.printf("[CURTAIN] State -> %s\n", ledState ? "OPEN" : "CLOSE");
@@ -523,8 +761,6 @@ void AppController::onCommandReceived(const JsonDocument& command)
             Serial.println("[CMD] ℹ️ Register not part of local map - forwarding to mYBUS only");
         }
 
-        // اگر رجیستر محلی بود و mirrorToCloud=false، دیگه نیازی به
-        // فرستادن فریم mYBUS نیست.
         if (localRegisters_.isLocal(regAddr) && !localRegisters_.shouldMirrorToCloud(regAddr)) {
             return;
         }

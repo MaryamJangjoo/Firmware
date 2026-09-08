@@ -31,15 +31,13 @@ struct LocalRegisterBinding {
     MyBusDataType type;
 
     void*  ptr;
-    size_t size;           // برای isString=true نادیده گرفته می‌شود
-
+    size_t size;          
     bool writable;
     bool mirrorToCloud;
-    bool isString = false; // اگر true، ptr به یک Arduino String* اشاره می‌کند
-
-    void* ctx = nullptr;
-    LocalRegisterHook onWrite = nullptr;
-    LocalRegisterHook onRead  = nullptr;
+    bool isString;          
+    void* ctx;              
+    LocalRegisterHook onWrite; 
+    LocalRegisterHook onRead;  
 };
 
 class LocalRegisterMap {

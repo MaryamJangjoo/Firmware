@@ -4,9 +4,6 @@
 #include "mybus_registry.h"
 
 // ============================================================
-// نقشه‌ی رسمی رجیسترهای EcoSmart
-// (مطابق EcoSmart_Registries_Map.docx)
-//
 // ⚠️ اصلاحیه: در سند اصلی "Audio Title/Artist" روی آدرس‌های 0x0700/0x0701
 // با TYP=string بودند، ولی طبق طرح بیتی پروتکل mYBUS این دو آدرس واقعاً
 // FLOAT دیکد می‌شوند و 0x0701 با "Current" در Energy Monitoring تصادم دارد.
@@ -55,17 +52,15 @@ static constexpr uint16_t REG_PASSWORD         = 0xC803; // string, R/W
 static constexpr uint16_t REG_CURTAIN_STATE            = 0x8100; // u8
 static constexpr uint16_t REG_CURTAIN_PERMANENT_TIMER  = 0x8220; // u16
 
-// ---- Audio System ----
-static constexpr uint16_t REG_AUDIO_MODE         = 0x8101; // u8
-static constexpr uint16_t REG_AUDIO_CONTROL      = 0x8102; // u8
-static constexpr uint16_t REG_AUDIO_SLEEP_TIMER  = 0x8221; // u16
-static constexpr uint16_t REG_AUDIO_STATION      = 0x8222; // u16
-static constexpr uint16_t REG_AUDIO_TITLE        = 0x0800; // string, R ✅ اصلاح‌شده
-static constexpr uint16_t REG_AUDIO_ARTIST       = 0x0801; // string, R ✅ اصلاح‌شده
-static constexpr uint16_t REG_AUDIO_VOLUME       = 0x8103; // u8
-static constexpr uint16_t REG_AUDIO_BASS         = 0x8104; // u8
-static constexpr uint16_t REG_AUDIO_TREBLE       = 0x8105; // u8
-static constexpr uint16_t REG_AUDIO_EQ           = 0x8106; // u8
+// ---- Audio System (طبق داکیومنت - ۸ رجیستر) ----
+static constexpr uint16_t REG_AUDIO_MODE         = 0x8101; // u8,   R/W
+static constexpr uint16_t REG_AUDIO_CONTROL      = 0x8102; // u8,   R/W
+static constexpr uint16_t REG_AUDIO_SLEEP_TIMER  = 0x8221; // u16,  R/W
+static constexpr uint16_t REG_AUDIO_STATION      = 0x8222; // u16,  R/W
+static constexpr uint16_t REG_AUDIO_TITLE        = 0x0800; // string, R  ← اصلاح‌شده
+static constexpr uint16_t REG_AUDIO_ARTIST       = 0x0801; // string, R  ← اصلاح‌شده
+static constexpr uint16_t REG_AUDIO_VOLUME       = 0x8103; // u8,   R/W
+static constexpr uint16_t REG_AUDIO_BASS         = 0x8104; // u8,   R/W
 
 // ---- RGB Led Strips ----
 static constexpr uint16_t REG_RGB_MODE       = 0x8107; // u8
