@@ -9,8 +9,6 @@
 #include <ArduinoJson.h>
 
 #include "CloudManager.h"
-#include "LocalRegisterMap.h"
-#include "ecosmart_registries.h"
 
 class AppController {
 public:
@@ -18,32 +16,8 @@ public:
 
     void begin();
     void handle();
-
+    
 private:
-    LocalRegisterMap localRegisters_;
-
-    // ---- Audio register state (8 Registers) ----
-    uint8_t  audioModeRaw_       = 0;      // 0x8101
-    uint8_t  audioControlRaw_    = 0;      // 0x8102
-    uint16_t audioSleepTimerRaw_ = 0;      // 0x8221
-    uint16_t audioStationRaw_    = 0;      // 0x8222
-    uint8_t  audioVolumeRaw_     = 70;     // 0x8103
-    uint8_t  audioBassRaw_       = 0;      // 0x8104
-    String   audioTitle_;                  // 0x0800 (اصلاح‌شده از 0x0700)
-    String   audioArtist_;                 // 0x0801 (اصلاح‌شده از 0x0701)
-
-
-    unsigned long lastSleepTimerTickMs_ = 0;
-
-    void registerLocalRegisters();
-    void registerAudioRegisters();
-    void tickAudioSleepTimer();
-
-    // ---- Serial Commands ----
-    void handleSerialCommands();
-    void testAllAudioRegisters();
-    void printHelp();
-
     // ---- Pin Definitions ----
     static constexpr int PIN_LED_1 = 33;
     static constexpr int PIN_LED_2 = 32;
@@ -64,18 +38,19 @@ private:
     static constexpr int PIN_I2S_PDN   = 27;
 
     // ---- WiFi Credentials ----
-    static constexpr const char* WIFI_SSID = "megafaYakand8202";
-    static constexpr const char* WIFI_PASSWORD = "megafaY@kand*@)@";
+    const char* WIFI_SSID     = "megafaYakand8202";
+    const char* WIFI_PASSWORD = "megafaY@kand*@)@";
 
-    // ---- mYBUS Configuration ----
+    // ---- myBUS Configuration ----
     static constexpr uint8_t MYBUS_DEVICE_ID = 1;
     static constexpr uint8_t MYBUS_ZONE_ID   = 1;
 
-    // ---- Hardware ----
+    // ---- Hardware Objects ----
     tas5805m amp;
     btAudio  bta;
     CRGB     leds[NUM_LEDS];
 
+    // ---- State Variables ----
     bool ledState     = false;
     bool lastLedState = false;
 
@@ -83,6 +58,16 @@ private:
     uint32_t lastUpdate = 0;
 
     CloudManager* cloudManager = nullptr;
+
+    // ---- WiFi Reconnect State Machine ----
+    enum class WifiReconnectState { IDLE, RECONNECTING };
+
+    WifiReconnectState wifiReconnectState_ = WifiReconnectState::IDLE;
+    unsigned long wifiReconnectStartMs_ = 0;
+    unsigned long wifiLastAttemptMs_ = 0;
+
+    static constexpr unsigned long WIFI_RECONNECT_ATTEMPT_INTERVAL_MS = 500;
+    static constexpr unsigned long WIFI_RECONNECT_TIMEOUT_MS = 10000;
 
     // ---- Private Methods ----
     bool connectToWiFi();
@@ -93,21 +78,16 @@ private:
     void handleWiFiReconnect();
     void handleLedState();
 
-    enum class WifiReconnectState { IDLE, RECONNECTING };
-
-    WifiReconnectState wifiReconnectState_ = WifiReconnectState::IDLE;
-    unsigned long wifiReconnectStartMs_ = 0;
-    unsigned long wifiLastAttemptMs_ = 0;
-
-    static constexpr unsigned long WIFI_RECONNECT_ATTEMPT_INTERVAL_MS = 500;
-    static constexpr unsigned long WIFI_RECONNECT_TIMEOUT_MS = 10000;
-
     void setCurtainOn();
     void setCurtainOff();
 
     void visualizeAudio(const uint8_t* data, uint32_t len);
     void onBtData(const uint8_t* data, uint32_t len);
     static void btDataTrampoline(const uint8_t* data, uint32_t len);
+
+    bool handleAudioRegistryWrite(uint16_t regAddr, const String& regVal);
+    bool handleCurtainRegistryWrite(uint16_t regAddr, const String& regVal);
+    String getRegistryValue(uint16_t regAddr);  
 
     void onCommandReceived(const JsonDocument& command);
 

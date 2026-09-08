@@ -12,7 +12,7 @@ inline uint16_t encodeRegistryAddress(
     bool isWrite,
     bool isSystem,
     bool isArray,
-    MyBusDataType dataType, 
+    MyBusDataType dataType,  // ← از mybus_frame.h استفاده می‌کند
     uint8_t address
 ) {
     uint16_t regAdd = 0;
