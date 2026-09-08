@@ -80,9 +80,6 @@ bool CloudAuth::refreshToken()
         return false;
     }
 
-    // ✅ رفع باگ: قبلاً بادی درخواست کاملاً خالی ساخته می‌شد و
-    // refreshTokenValue_ هیچ‌وقت به بدنه اضافه نمی‌شد، پس بک‌اند
-    // نمی‌توانست بفهمد کدام توکن باید رفرش شود.
     JsonDocument doc;
     doc["refreshToken"] = refreshTokenValue_;
 
@@ -137,10 +134,6 @@ bool CloudAuth::isTokenValid() const
     return !jwtToken_.isEmpty();
 }
 
-// ⚠️ توجه: loginOffline/verifyUserPassword از این فایل حذف شدند.
-// منطق واقعی در CloudStorage::loginOffline / CloudStorage::verifyUserPassword
-// پیاده‌سازی شده و CloudManager مستقیماً از آن استفاده می‌کند
-// (نگاه کنید به CloudManager::loginOffline).
 
 String CloudAuth::loadToken()
 {

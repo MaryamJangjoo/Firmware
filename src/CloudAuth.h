@@ -30,12 +30,6 @@ private:
     String siteId_;
     bool isAuthenticated_ = false;
 
-    // ⚠️ توجه: پیاده‌سازی loginOffline/verifyUserPassword از این کلاس حذف شد.
-    // این دو متد قبلاً همیشه false برمی‌گرداندند چون CloudAuth هیچ ارجاعی
-    // به CloudStorage نداشت. منطق واقعی offline-login در CloudStorage است
-    // و CloudManager::loginOffline مستقیماً از storage_.loginOffline()
-    // استفاده می‌کند. اگر نیاز به offline-login از این کلاس بود، باید
-    // CloudStorage& را به سازنده تزریق کرد.
 };
 
 #endif

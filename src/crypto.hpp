@@ -15,6 +15,7 @@
 #include <mbedtls/gcm.h>
 #include <mbedtls/base64.h>
 #include <mbedtls/hkdf.h>
+#include <mbedtls/pkcs5.h>
 
 // ============================================================
 // Constants
@@ -167,6 +168,54 @@ bool cryptoRandomBytes(
 void cryptoSecureZero(
     void* buffer,
     size_t length
+);
+
+// ============================================================
+// ✅ Password Hashing (PBKDF2-HMAC-SHA256)
+//
+// جایگزین ذخیره‌ی پسورد به‌صورت متن‌ساده (plaintext) در
+// CloudStorage::createDefaultUsersFile(). فرمت ذخیره‌سازی:
+//
+//     "<saltHex>$<hashHex>"
+//
+//   - salt: 16 بایت تصادفی (32 کاراکتر هگز)
+//   - hash: خروجی 32 بایتی PBKDF2-HMAC-SHA256 (64 کاراکتر هگز)
+//   - جداکننده: کاراکتر '$'
+//
+// این رشته‌ی ترکیبی (salt$hash) همان چیزی است که در فیلد
+// UserInfo::passwordHash ذخیره می‌شود؛ یعنی ساختار فایل
+// users.json تغییری نمی‌کند، فقط محتوای این فیلد دیگر پسورد
+// خام نیست.
+//
+// تعداد iteration پیش‌فرض (10000) روی ESP32 چند ده تا چند صد
+// میلی‌ثانیه طول می‌کشد؛ چون فقط در لحظه‌ی لاگین (نه در loop())
+// صدا زده می‌شود، قابل قبول است.
+// ============================================================
+
+static constexpr size_t PBKDF2_SALT_SIZE = 16;
+static constexpr size_t PBKDF2_HASH_SIZE = 32;
+static constexpr uint32_t PBKDF2_DEFAULT_ITERATIONS = 10000;
+static constexpr char PBKDF2_SEPARATOR = '$';
+
+// یک salt تصادفی جدید تولید می‌کند، PBKDF2 را روی password اجرا
+// می‌کند و نتیجه را به‌صورت "saltHex$hashHex" در outCombined
+// برمی‌گرداند. برای هر بار فراخوانی (حتی با همان پسورد) یک salt
+// جدید تولید می‌شود، پس دو خروجی برای یک پسورد یکسان هم متفاوت
+// خواهند بود (این طبیعی و مطلوب است).
+bool cryptoHashPassword(
+    const String& password,
+    String& outCombined,
+    uint32_t iterations = PBKDF2_DEFAULT_ITERATIONS
+);
+
+// password ورودی را با فرمت ذخیره‌شده‌ی "saltHex$hashHex" مقایسه
+// می‌کند. salt از خود storedCombined استخراج می‌شود، پس هر کاربر
+// می‌تواند salt متفاوتی داشته باشد. مقایسه‌ی نهایی به‌صورت
+// constant-time انجام می‌شود تا در برابر timing attack مقاوم باشد.
+bool cryptoVerifyPassword(
+    const String& password,
+    const String& storedCombined,
+    uint32_t iterations = PBKDF2_DEFAULT_ITERATIONS
 );
 
 // ============================================================

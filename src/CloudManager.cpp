@@ -8,9 +8,6 @@
 
 namespace {
 
-// ============================================================
-// Backend / JWT Device Identity
-// ============================================================
 
 String generateDeviceId()
 {
@@ -28,11 +25,7 @@ String generateDeviceId()
     return String(buffer);
 }
 
-} // namespace
-
-// ============================================================
-// Constructor
-// ============================================================
+} 
 
 CloudManager::CloudManager()
     : httpTransport_(
@@ -62,9 +55,7 @@ CloudManager::CloudManager()
           siteId_
       )
 {
-    // --------------------------------------------------------
-    // Preferences
-    // --------------------------------------------------------
+  
 
     if (!preferences_.begin("cloud", false)) {
         Serial.println(
@@ -72,20 +63,7 @@ CloudManager::CloudManager()
         );
     }
 
-    // --------------------------------------------------------
-    // String Device ID
-    // Used for JWT / backend identity
-    //
-    // ⚠️ نکته‌ی مهم: در لحظه‌ای که mybusSession_ در init-list بالا
-    // ساخته شد، deviceId_ هنوز مقدار خالی/پیش‌فرض داشت (چون اعضا به
-    // ترتیب اعلان در .h ساخته می‌شوند، نه به ترتیب init-list، و
-    // deviceId_ در .h قبل از mybusSession_ اعلان شده ولی هنوز اینجا
-    // در بدنه‌ی سازنده مقداردهی نشده بود). چون MybusSession::deviceId_
-    // یک کپی است نه رفرنس، این یعنی MybusSession همیشه deviceId خالی
-    // داشت و هندشیک با خطای Forbidden رد می‌شد.
-    // ✅ رفع باگ: بلافاصله بعد از تعیین مقدار نهایی deviceId_، آن را
-    // صراحتاً به mybusSession_ هم منتقل می‌کنیم.
-    // --------------------------------------------------------
+
 
     deviceId_ = generateDeviceId();
 

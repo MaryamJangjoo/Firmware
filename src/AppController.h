@@ -14,10 +14,10 @@ class AppController {
 public:
     AppController();
 
-    void begin();   
-    void handle();  
+    void begin();
+    void handle();
 private:
-    // ---- Pins ----
+
     static constexpr int PIN_LED_1 = 33;
     static constexpr int PIN_LED_2 = 32;
     static constexpr int NUM_LEDS  = 30;
@@ -36,18 +36,13 @@ private:
     static constexpr int PIN_I2S_FAULT = 34;
     static constexpr int PIN_I2S_PDN   = 27;
 
-    // ---- WiFi ----
     const char* WIFI_SSID     = "megafaYakand8202";
     const char* WIFI_PASSWORD = "megafaY@kand*@)@";
 
-    // ---- mYBUS numeric address ----
-    // ⚠️ این مقادیر باید دقیقاً با device.mybusDeviceId و
-    // device.mybusZoneId این دستگاه در بک‌اند یکی باشند، وگرنه
-    // performHandshake() با "Invalid Device ID/Zone" شکست می‌خورد.
     static constexpr uint8_t MYBUS_DEVICE_ID = 1;
     static constexpr uint8_t MYBUS_ZONE_ID   = 1;
 
-    // ---- Hardware objects ----
+
     tas5805m amp;
     btAudio  bta;
     CRGB     leds[NUM_LEDS];
@@ -60,21 +55,28 @@ private:
 
     CloudManager* cloudManager = nullptr;
 
-    // ---- setup helpers ----
+
     bool connectToWiFi();
     void initCloudManager();
     void initAudioHardware();
     void configureMybusAddress();
 
-    // ---- loop helpers ----
     void handleWiFiReconnect();
     void handleLedState();
 
-    // ---- Curtain ----
+
+    enum class WifiReconnectState { IDLE, RECONNECTING };
+
+    WifiReconnectState wifiReconnectState_ = WifiReconnectState::IDLE;
+    unsigned long wifiReconnectStartMs_ = 0;
+    unsigned long wifiLastAttemptMs_ = 0;
+
+    static constexpr unsigned long WIFI_RECONNECT_ATTEMPT_INTERVAL_MS = 500;
+    static constexpr unsigned long WIFI_RECONNECT_TIMEOUT_MS = 10000;
+
     void setCurtainOn();
     void setCurtainOff();
 
-    // ---- Audio ----
     void visualizeAudio(const uint8_t* data, uint32_t len);
     void onBtData(const uint8_t* data, uint32_t len);
     static void btDataTrampoline(const uint8_t* data, uint32_t len);
@@ -82,7 +84,6 @@ private:
     bool handleAudioRegistryWrite(uint16_t regAddr, const String& regVal);
     bool handleCurtainRegistryWrite(uint16_t regAddr, const String& regVal);
 
-    // ---- Cloud command handling ----
     void onCommandReceived(const JsonDocument& command);
 
     static AppController* s_instance;

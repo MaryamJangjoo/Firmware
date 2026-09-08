@@ -3,6 +3,8 @@
 #include <Arduino.h>
 #include <ArduinoJson.h>
 
+#include "crypto.hpp"
+
 #ifdef USE_LittleFS
 #include <LittleFS.h>
 #else
@@ -126,6 +128,7 @@ void CloudStorage::printFileContent(const String& path)
     Serial.println("--- END ---");
 }
 
+
 bool CloudStorage::createDefaultUsersFile()
 {
     String existing;
@@ -134,11 +137,20 @@ bool CloudStorage::createDefaultUsersFile()
         return true;
     }
 
+    String hashedPassword;
+
+    if (!cryptoHashPassword("SecurePassword@2026", hashedPassword)) {
+        Serial.println(
+            "[FS] ❌ Failed to hash default password - users.json NOT created"
+        );
+        return false;
+    }
+
     JsonDocument doc;
     JsonArray users = doc["users"].to<JsonArray>();
     JsonObject user = users.add<JsonObject>();
     user["username"] = "tes29t_operator";
-    user["passwordHash"] = "SecurePassword@2026";
+    user["passwordHash"] = hashedPassword; 
     user["publicKey"] = "-----BEGIN PUBLIC KEY-----...";
     user["role"] = "OWNER";
     user["lastLogin"] = 0;
@@ -150,7 +162,7 @@ bool CloudStorage::createDefaultUsersFile()
     serializeJson(doc, jsonContent);
 
     if (writeFile("/users.json", jsonContent)) {
-        Serial.println("[FS] users.json created");
+        Serial.println("[FS] ✅ users.json created (password hashed with PBKDF2)");
         return true;
     }
     Serial.println("[FS] Failed to create users.json");
@@ -228,7 +240,7 @@ bool CloudStorage::saveUsers(const std::vector<UserInfo>& users)
     for (const auto& user : users) {
         JsonObject obj = arr.add<JsonObject>();
         obj["username"] = user.username;
-        obj["passwordHash"] = user.passwordHash;
+        obj["passwordHash"] = user.passwordHash; 
         obj["publicKey"] = user.publicKey;
         obj["role"] = user.role;
         obj["lastLogin"] = user.lastLogin;
@@ -280,8 +292,7 @@ bool CloudStorage::saveSiteInfo(const SiteInfo& info)
     return writeFile("/site_info.json", content);
 }
 
-// ⚠️ همچنان مقایسه‌ی متن‌ساده (نه هش واقعی) — یادداشت امنیتی قبلی
-// همچنان صادق است؛ برای production باید با bcrypt/PBKDF2 جایگزین شود.
+
 bool CloudStorage::verifyUserPassword(const String& username, const String& password)
 {
     std::vector<UserInfo> users;
@@ -289,7 +300,7 @@ bool CloudStorage::verifyUserPassword(const String& username, const String& pass
 
     for (const auto& user : users) {
         if (user.username == username) {
-            if (user.passwordHash == password) {
+            if (cryptoVerifyPassword(password, user.passwordHash)) {
                 Serial.printf("[AUTH] User '%s' verified offline\n", username.c_str());
                 return true;
             }

@@ -19,9 +19,6 @@ AppController::AppController()
     s_instance = this;
 }
 
-// ============================================================
-// begin
-// ============================================================
 
 void AppController::begin()
 {
@@ -36,8 +33,8 @@ void AppController::begin()
     Serial.println("System Starting ....");
 
     pinMode(PIN_I2S_PDN, OUTPUT);
-    digitalWrite(PIN_I2S_PDN, HIGH);   
-    delay(10);                         
+    digitalWrite(PIN_I2S_PDN, HIGH);
+    delay(10);
     Serial.println("PDN pin set HIGH (TAS5805M active)");
 
     if (!connectToWiFi()) {
@@ -50,7 +47,6 @@ void AppController::begin()
     initCloudManager();
     configureMybusAddress();
 
-    // ---- Login ----
     Serial.println("[AUTH] Attempting to login...");
     bool loginSuccess = cloudManager->loginUser(
         "tes29t_operator", "SecurePassword@2026", cloudManager->getDeviceId());
@@ -66,7 +62,7 @@ void AppController::begin()
         }
     }
 
-    // ---- mYBUS Handshake ----
+
     if (cloudManager->isLoggedIn()) {
         if (cloudManager->isSecureSessionEstablished()) {
             Serial.println("[mYBUS] ✅ Using restored session from NVS, skipping handshake");
@@ -92,9 +88,6 @@ void AppController::begin()
     Serial.println();
 }
 
-// ============================================================
-// handle
-// ============================================================
 
 void AppController::handle()
 {
@@ -105,12 +98,8 @@ void AppController::handle()
     handleWiFiReconnect();
     handleLedState();
 
-    // delay(100);
 }
 
-// ============================================================
-// setup helpers
-// ============================================================
 
 bool AppController::connectToWiFi()
 {
@@ -150,10 +139,6 @@ void AppController::initCloudManager()
     Serial.println("[CLOUD] CloudManager initialized successfully");
 }
 
-// ✅ رفع باگ: mybusDeviceId_/mybusZoneId_ در CloudManager هیچ‌جا مقداردهی
-// نمی‌شدند (مگر از NVS بازیابی شده باشند)، پس performHandshake() همیشه
-// با "Invalid Device ID/Zone" شکست می‌خورد. این تابع مقدار پیش‌فرض را
-// -فقط در صورتی که هنوز پیکربندی نشده باشند- تنظیم می‌کند.
 void AppController::configureMybusAddress()
 {
     if (cloudManager == nullptr) {
@@ -194,25 +179,35 @@ void AppController::initAudioHardware()
     bta.setSinkCallback(&AppController::btDataTrampoline);
 }
 
-// ============================================================
-// loop helpers
-// ============================================================
 
 void AppController::handleWiFiReconnect()
 {
-    if (WiFi.status() != WL_CONNECTED) {
+    if (WiFi.status() == WL_CONNECTED) {
+        if (wifiReconnectState_ == WifiReconnectState::RECONNECTING) {
+            Serial.println("[WiFi] ✅ Reconnected!");
+            wifiReconnectState_ = WifiReconnectState::IDLE;
+        }
+        return;
+    }
+
+    const unsigned long now = millis();
+
+    if (wifiReconnectState_ == WifiReconnectState::IDLE) {
         Serial.println("[WiFi] Connection lost. Reconnecting...");
         WiFi.reconnect();
-        int attempts = 0;
-        while (WiFi.status() != WL_CONNECTED && attempts < 20) {
-            delay(500);
-            attempts++;
-        }
-        if (WiFi.status() == WL_CONNECTED) {
-            Serial.println("[WiFi] ✅ Reconnected!");
-        } else {
-            Serial.println("[WiFi] ❌ Reconnect failed!");
-        }
+        wifiReconnectState_ = WifiReconnectState::RECONNECTING;
+        wifiReconnectStartMs_ = now;
+        wifiLastAttemptMs_ = now;
+        return;
+    }
+
+    if (now - wifiLastAttemptMs_ >= WIFI_RECONNECT_ATTEMPT_INTERVAL_MS) {
+        wifiLastAttemptMs_ = now;
+    
+    }
+    if (now - wifiReconnectStartMs_ >= WIFI_RECONNECT_TIMEOUT_MS) {
+        Serial.println("[WiFi] ❌ Reconnect timeout, will retry on next loop pass");
+        wifiReconnectState_ = WifiReconnectState::IDLE;
     }
 }
 
@@ -224,9 +219,6 @@ void AppController::handleLedState()
     }
 }
 
-// ============================================================
-// Curtain (shift register)
-// ============================================================
 
 void AppController::setCurtainOn()
 {
@@ -244,9 +236,6 @@ void AppController::setCurtainOff()
     digitalWrite(PIN_SR_LATCH, HIGH);
 }
 
-// ============================================================
-// Audio visualization + BT sink
-// ============================================================
 
 void AppController::visualizeAudio(const uint8_t* data, uint32_t len)
 {
@@ -283,9 +272,6 @@ void AppController::btDataTrampoline(const uint8_t* data, uint32_t len)
     }
 }
 
-// ============================================================
-// Audio registry write
-// ============================================================
 
 bool AppController::handleAudioRegistryWrite(uint16_t regAddr, const String& regVal)
 {
@@ -322,14 +308,6 @@ bool AppController::handleAudioRegistryWrite(uint16_t regAddr, const String& reg
     return false;
 }
 
-// ============================================================
-// Curtain registry write
-//
-// ✅ رفع باگ: قبلاً ledState هیچ‌جا از روی رجیستر ست نمی‌شد، پس
-// نوشتن روی REG_CURTAIN_STATE هیچ اثری روی رله‌های شیفت‌رجیستر
-// نداشت. الان با نوشتن روی این رجیستر، ledState به‌روزرسانی می‌شود
-// و handleLedState() در حلقه‌ی اصلی آن را به رله‌ها اعمال می‌کند.
-// ============================================================
 
 bool AppController::handleCurtainRegistryWrite(uint16_t regAddr, const String& regVal)
 {
@@ -343,9 +321,6 @@ bool AppController::handleCurtainRegistryWrite(uint16_t regAddr, const String& r
     return false;
 }
 
-// ============================================================
-// Command callback از CloudManager
-// ============================================================
 
 void AppController::onCommandReceived(const JsonDocument& command)
 {
@@ -372,7 +347,10 @@ void AppController::onCommandReceived(const JsonDocument& command)
             req["RegVal"] = "";
 
             JsonDocument response;
-            if (cloudManager->sendMybusData(req, &response)) {
+            bool sent = cloudManager->sendMybusData(req, &response);
+            bool readSuccess = sent && (response["success"] | false);
+
+            if (readSuccess) {
                 Serial.println("[CMD] ✅ Registry response received:");
                 serializeJson(response, Serial);
                 Serial.println();

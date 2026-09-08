@@ -8,6 +8,7 @@
 #include <mbedtls/pk.h>
 #include <mbedtls/gcm.h>
 #include <mbedtls/base64.h>
+#include <mbedtls/pkcs5.h>
 
 // ============================================================
 // Global crypto state
@@ -1403,4 +1404,215 @@ String cryptoBytesToBase64(
     delete[] output;
 
     return result;
+}
+
+// ============================================================
+// ✅ Password Hashing (PBKDF2-HMAC-SHA256, format: "saltHex$hashHex")
+// ============================================================
+
+// هسته‌ی مشترک PBKDF2: با یک salt مشخص، هش را روی password محاسبه
+// می‌کند. هم توسط cryptoHashPassword (با salt تصادفی تازه) و هم
+// توسط cryptoVerifyPassword (با salt استخراج‌شده از رشته‌ی ذخیره‌شده)
+// استفاده می‌شود تا منطق PBKDF2 فقط در یک نقطه وجود داشته باشد.
+static bool pbkdf2Compute(
+    const String& password,
+    const uint8_t* salt,
+    size_t saltLen,
+    uint32_t iterations,
+    uint8_t* outHash,
+    size_t outHashLen
+) {
+
+    mbedtls_md_context_t ctx;
+    mbedtls_md_init(&ctx);
+
+    const mbedtls_md_info_t* info =
+        mbedtls_md_info_from_type(
+            MBEDTLS_MD_SHA256
+        );
+
+    if (!info) {
+        mbedtls_md_free(&ctx);
+        return false;
+    }
+
+    // آرگومان دوم (hmac) باید 1 باشد تا context برای HMAC آماده شود
+    // (پیش‌نیاز mbedtls_pkcs5_pbkdf2_hmac).
+    int ret = mbedtls_md_setup(&ctx, info, 1);
+
+    if (ret != 0) {
+        Serial.printf(
+            "[CRYPTO] PBKDF2 md_setup failed: -0x%04X\n",
+            -ret
+        );
+        mbedtls_md_free(&ctx);
+        return false;
+    }
+
+    ret = mbedtls_pkcs5_pbkdf2_hmac(
+        &ctx,
+        reinterpret_cast<const unsigned char*>(password.c_str()),
+        password.length(),
+        salt,
+        saltLen,
+        iterations,
+        outHashLen,
+        outHash
+    );
+
+    mbedtls_md_free(&ctx);
+
+    if (ret != 0) {
+        Serial.printf(
+            "[CRYPTO] PBKDF2 computation failed: -0x%04X\n",
+            -ret
+        );
+        return false;
+    }
+
+    return true;
+}
+
+bool cryptoHashPassword(
+    const String& password,
+    String& outCombined,
+    uint32_t iterations
+) {
+
+    outCombined = "";
+
+    if (password.isEmpty()) {
+        Serial.println(
+            "[CRYPTO] cryptoHashPassword: empty password"
+        );
+        return false;
+    }
+
+    if (!cryptoInit()) {
+        return false;
+    }
+
+    uint8_t salt[PBKDF2_SALT_SIZE];
+
+    if (!cryptoRandomBytes(salt, sizeof(salt))) {
+        Serial.println(
+            "[CRYPTO] cryptoHashPassword: salt generation failed"
+        );
+        return false;
+    }
+
+    uint8_t hash[PBKDF2_HASH_SIZE];
+    memset(hash, 0, sizeof(hash));
+
+    const bool ok = pbkdf2Compute(
+        password,
+        salt,
+        sizeof(salt),
+        iterations,
+        hash,
+        sizeof(hash)
+    );
+
+    if (!ok) {
+        cryptoSecureZero(salt, sizeof(salt));
+        cryptoSecureZero(hash, sizeof(hash));
+        return false;
+    }
+
+    outCombined =
+        cryptoBytesToHex(salt, sizeof(salt)) +
+        String(PBKDF2_SEPARATOR) +
+        cryptoBytesToHex(hash, sizeof(hash));
+
+    cryptoSecureZero(salt, sizeof(salt));
+    cryptoSecureZero(hash, sizeof(hash));
+
+    return true;
+}
+
+bool cryptoVerifyPassword(
+    const String& password,
+    const String& storedCombined,
+    uint32_t iterations
+) {
+
+    if (password.isEmpty() || storedCombined.isEmpty()) {
+        return false;
+    }
+
+    if (!cryptoInit()) {
+        return false;
+    }
+
+    const int sep = storedCombined.indexOf(PBKDF2_SEPARATOR);
+
+    if (sep <= 0 || sep >= static_cast<int>(storedCombined.length()) - 1) {
+        Serial.println(
+            "[CRYPTO] cryptoVerifyPassword: malformed stored hash (no separator)"
+        );
+        return false;
+    }
+
+    const String saltHex = storedCombined.substring(0, sep);
+    const String expectedHashHex = storedCombined.substring(sep + 1);
+
+    if (saltHex.length() != PBKDF2_SALT_SIZE * 2 ||
+        expectedHashHex.length() != PBKDF2_HASH_SIZE * 2) {
+
+        Serial.println(
+            "[CRYPTO] cryptoVerifyPassword: unexpected salt/hash length"
+        );
+        return false;
+    }
+
+    uint8_t salt[PBKDF2_SALT_SIZE];
+
+    if (!cryptoHexToBytes(saltHex, salt, sizeof(salt))) {
+        Serial.println(
+            "[CRYPTO] cryptoVerifyPassword: salt hex decode failed"
+        );
+        return false;
+    }
+
+    uint8_t computedHash[PBKDF2_HASH_SIZE];
+    memset(computedHash, 0, sizeof(computedHash));
+
+    const bool ok = pbkdf2Compute(
+        password,
+        salt,
+        sizeof(salt),
+        iterations,
+        computedHash,
+        sizeof(computedHash)
+    );
+
+    cryptoSecureZero(salt, sizeof(salt));
+
+    if (!ok) {
+        cryptoSecureZero(computedHash, sizeof(computedHash));
+        return false;
+    }
+
+    const String computedHashHex =
+        cryptoBytesToHex(computedHash, sizeof(computedHash));
+
+    cryptoSecureZero(computedHash, sizeof(computedHash));
+
+    // ------------------------------------------------------
+    // مقایسه‌ی constant-time (نه ==) برای مقاومت در برابر
+    // timing attack روی طول/محتوای هش.
+    // ------------------------------------------------------
+
+    if (computedHashHex.length() != expectedHashHex.length()) {
+        return false;
+    }
+
+    uint8_t diff = 0;
+
+    for (size_t i = 0; i < computedHashHex.length(); ++i) {
+        diff |= static_cast<uint8_t>(computedHashHex[i]) ^
+                static_cast<uint8_t>(expectedHashHex[i]);
+    }
+
+    return diff == 0;
 }
