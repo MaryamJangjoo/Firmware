@@ -1,7 +1,7 @@
 #include "AppController.h"
 #include <esp_system.h>
 
-#include "ecosmart_registries.h"
+#include "ecosmart_registeries.h"
 #include "crypto.hpp"
 
 #include <WiFi.h>
@@ -276,7 +276,7 @@ void AppController::btDataTrampoline(const uint8_t* data, uint32_t len)
 bool AppController::handleAudioRegistryWrite(uint16_t regAddr, const String& regVal)
 {
     // --- Volume ---
-    if (regAddr == REG_AUDIO_VOLUME) {
+    if (regAddr == REG_ADD_AUDIO_VOLUME) {
         int vol = regVal.toInt();
         vol = constrain(vol, 0, 100);
         esp_err_t ret = tas5805m_set_volume_pct((uint8_t)vol);
@@ -285,7 +285,7 @@ bool AppController::handleAudioRegistryWrite(uint16_t regAddr, const String& reg
     }
 
     // --- Control (Play/Pause/Stop) ---
-    if (regAddr == REG_AUDIO_CONTROL) {
+    if (regAddr == REG_ADD_AUDIO_CONTROL) {
         int cmd = regVal.toInt();
         Serial.printf("[AUDIO] Control command: %d\n", cmd);
         switch (cmd) {
@@ -304,7 +304,7 @@ bool AppController::handleAudioRegistryWrite(uint16_t regAddr, const String& reg
     }
 
     // --- Bass ---
-    if (regAddr == REG_AUDIO_BASS) {
+    if (regAddr == REG_ADD_AUDIO_BASS) {
         int bass = regVal.toInt();
         bass = constrain(bass, 0, 100);
         // TODO: تنظیم بیس در TAS5805M
@@ -313,21 +313,21 @@ bool AppController::handleAudioRegistryWrite(uint16_t regAddr, const String& reg
     }
 
     // --- Audio Mode ---
-    if (regAddr == REG_AUDIO_MODE) {
+    if (regAddr == REG_ADD_AUDIO_MODE) {
         int mode = regVal.toInt();
         Serial.printf("[AUDIO] Audio mode -> %d (not wired)\n", mode);
         return true;
     }
 
     // --- Audio Station ---
-    if (regAddr == REG_AUDIO_STATION) {
+    if (regAddr == REG_ADD_AUDIO_STATION) {
         int station = regVal.toInt();
         Serial.printf("[AUDIO] Station -> %d (not wired)\n", station);
         return true;
     }
 
     // --- Sleep Timer ---
-    if (regAddr == REG_AUDIO_SLEEP_TIMER) {
+    if (regAddr == REG_ADD_AUDIO_SLEEP_TIMER) {
         int timer = regVal.toInt();
         Serial.printf("[AUDIO] Sleep timer -> %d min (not wired)\n", timer);
         return true;
@@ -339,7 +339,7 @@ bool AppController::handleAudioRegistryWrite(uint16_t regAddr, const String& reg
 
 bool AppController::handleCurtainRegistryWrite(uint16_t regAddr, const String& regVal)
 {
-    if (regAddr == REG_CURTAIN_STATE) {
+    if (regAddr == REG_ADD_CURTAIN_STATE) {
         int state = regVal.toInt();
         ledState = (state != 0);
         Serial.printf("[CURTAIN] State -> %s\n", ledState ? "OPEN" : "CLOSE");

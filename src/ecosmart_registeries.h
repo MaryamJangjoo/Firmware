@@ -2,6 +2,8 @@
 #define ECOSMART_REGISTRIES_H
 
 #include "mybus_registry.h"
+#include "inputs.hpp"
+#include "Outputs.hpp"
 
 typedef enum
 {
