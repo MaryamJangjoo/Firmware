@@ -9,6 +9,8 @@
 #include <ArduinoJson.h>
 
 #include "CloudManager.h"
+#include "LocalRegisterMap.h"
+#include "ecosmart_registries.h"
 
 class AppController {
 public:
@@ -16,7 +18,27 @@ public:
 
     void begin();
     void handle();
+
 private:
+    LocalRegisterMap localRegisters_;
+
+    // ---- Audio register state ----
+    uint8_t  audioModeRaw_       = 0;
+    uint8_t  audioControlRaw_    = 0;
+    uint16_t audioSleepTimerRaw_ = 0;
+    uint16_t audioStationRaw_    = 0;
+    uint8_t  audioVolumeRaw_     = 70;
+    uint8_t  audioBassRaw_       = 0;
+    uint8_t  audioTrebleRaw_     = 0;
+    uint8_t  audioEqRaw_         = 0;
+    String   audioTitle_;
+    String   audioArtist_;
+
+    unsigned long lastSleepTimerTickMs_ = 0;
+
+    void registerLocalRegisters();
+    void registerAudioRegisters();
+    void tickAudioSleepTimer();
 
     static constexpr int PIN_LED_1 = 33;
     static constexpr int PIN_LED_2 = 32;
@@ -42,7 +64,6 @@ private:
     static constexpr uint8_t MYBUS_DEVICE_ID = 1;
     static constexpr uint8_t MYBUS_ZONE_ID   = 1;
 
-
     tas5805m amp;
     btAudio  bta;
     CRGB     leds[NUM_LEDS];
@@ -55,7 +76,6 @@ private:
 
     CloudManager* cloudManager = nullptr;
 
-
     bool connectToWiFi();
     void initCloudManager();
     void initAudioHardware();
@@ -63,7 +83,6 @@ private:
 
     void handleWiFiReconnect();
     void handleLedState();
-
 
     enum class WifiReconnectState { IDLE, RECONNECTING };
 
@@ -80,9 +99,6 @@ private:
     void visualizeAudio(const uint8_t* data, uint32_t len);
     void onBtData(const uint8_t* data, uint32_t len);
     static void btDataTrampoline(const uint8_t* data, uint32_t len);
-
-    bool handleAudioRegistryWrite(uint16_t regAddr, const String& regVal);
-    bool handleCurtainRegistryWrite(uint16_t regAddr, const String& regVal);
 
     void onCommandReceived(const JsonDocument& command);
 
