@@ -9,9 +9,7 @@
 #include "mybus_registry.h"
 #include "mybus_protocol_constants.h"
 
-// ============================================================
-// Constructor
-// ============================================================
+
 
 MybusTransport::MybusTransport(
     HttpTransport& transport,
@@ -21,9 +19,6 @@ MybusTransport::MybusTransport(
 {
 }
 
-// ============================================================
-// Address validation
-// ============================================================
 
 bool MybusTransport::validateAddress(
     uint8_t deviceId,
@@ -50,9 +45,6 @@ bool MybusTransport::validateAddress(
     return true;
 }
 
-// ============================================================
-// sendMybusBinaryFrame
-// ============================================================
 
 bool MybusTransport::sendMybusBinaryFrame(
     uint8_t sequence,
@@ -94,16 +86,10 @@ bool MybusTransport::sendMybusBinaryFrame(
         return false;
     }
 
-    // --------------------------------------------------------
-    // SCU request
-    // --------------------------------------------------------
 
     flags |=
         (1U << MYBUS_FLAG_SCU_BIT);
 
-    // --------------------------------------------------------
-    // Build header
-    // --------------------------------------------------------
 
     MyBusHeader hdr;
 
@@ -121,9 +107,6 @@ bool MybusTransport::sendMybusBinaryFrame(
     hdr.compression      = compression;
     hdr.command          = command;
 
-    // --------------------------------------------------------
-    // Allocate plain/cipher buffers
-    // --------------------------------------------------------
 
     const size_t maxFrameSize =
         MYBUS_HEADER_SIZE +
@@ -138,9 +121,6 @@ bool MybusTransport::sendMybusBinaryFrame(
         maxFrameSize
     );
 
-    // --------------------------------------------------------
-    // Header + payload + CRC
-    // --------------------------------------------------------
 
     const size_t plainLen =
         mybus_buildFrame(
@@ -159,9 +139,7 @@ bool MybusTransport::sendMybusBinaryFrame(
         return false;
     }
 
-    // --------------------------------------------------------
-    // Debug plain frame
-    // --------------------------------------------------------
+
 
     Serial.printf(
         "[mYBUS] Plain frame (%u bytes): ",
@@ -175,9 +153,7 @@ bool MybusTransport::sendMybusBinaryFrame(
         )
     );
 
-    // --------------------------------------------------------
-    // AES-256-GCM
-    // --------------------------------------------------------
+
 
     uint8_t iv[MYBUS_AES_IV_SIZE] = {0};
     uint8_t tag[MYBUS_AES_TAG_SIZE] = {0};

@@ -107,9 +107,6 @@ bool LocalRegisterMap::writeValueFromString(uint16_t addr, const String& regVal)
     memcpy(b->ptr, buf, len);
     portEXIT_CRITICAL(&mux_);
 
-    // ⚠️ onWrite عمداً بیرون از critical section: ممکن است I2C
-    // (tas5805m) بزند، و نگه‌داشتن spinlock در طول یک تراکنش I2C
-    // می‌تواند core دیگر را برای مدت نامعلوم بلاک کند.
     if (b->onWrite != nullptr) b->onWrite(b->ctx, b->ptr);
 
     return true;

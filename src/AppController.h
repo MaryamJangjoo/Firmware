@@ -18,7 +18,6 @@ public:
     void handle();
     
 private:
-    // ---- Pin Definitions ----
     static constexpr int PIN_LED_1 = 33;
     static constexpr int PIN_LED_2 = 32;
     static constexpr int NUM_LEDS  = 30;
@@ -37,20 +36,16 @@ private:
     static constexpr int PIN_I2S_FAULT = 34;
     static constexpr int PIN_I2S_PDN   = 27;
 
-    // ---- WiFi Credentials ----
     const char* WIFI_SSID     = "megafaYakand8202";
     const char* WIFI_PASSWORD = "megafaY@kand*@)@";
 
-    // ---- myBUS Configuration ----
     static constexpr uint8_t MYBUS_DEVICE_ID = 1;
     static constexpr uint8_t MYBUS_ZONE_ID   = 1;
 
-    // ---- Hardware Objects ----
     tas5805m amp;
     btAudio  bta;
     CRGB     leds[NUM_LEDS];
 
-    // ---- State Variables ----
     bool ledState     = false;
     bool lastLedState = false;
 
@@ -59,7 +54,6 @@ private:
 
     CloudManager* cloudManager = nullptr;
 
-    // ---- WiFi Reconnect State Machine ----
     enum class WifiReconnectState { IDLE, RECONNECTING };
 
     WifiReconnectState wifiReconnectState_ = WifiReconnectState::IDLE;
@@ -69,7 +63,6 @@ private:
     static constexpr unsigned long WIFI_RECONNECT_ATTEMPT_INTERVAL_MS = 500;
     static constexpr unsigned long WIFI_RECONNECT_TIMEOUT_MS = 10000;
 
-    // ---- Private Methods ----
     bool connectToWiFi();
     void initCloudManager();
     void initAudioHardware();
@@ -88,6 +81,9 @@ private:
     bool handleAudioRegistryWrite(uint16_t regAddr, const String& regVal);
     bool handleCurtainRegistryWrite(uint16_t regAddr, const String& regVal);
     String getRegistryValue(uint16_t regAddr);  
+    bool readLocalRegistry(uint16_t regAddr, JsonDocument& outValue);
+    bool writeLocalRegistry(uint16_t regAddr, const String& regVal);   
+    void applyOutputsToHardware();                                 
 
     void onCommandReceived(const JsonDocument& command);
 

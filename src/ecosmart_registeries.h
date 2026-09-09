@@ -1,5 +1,5 @@
-#ifndef ECOSMART_REGISTRIES_H
-#define ECOSMART_REGISTRIES_H
+#ifndef ECOSMART_REGISTERIES_H
+#define ECOSMART_REGISTERIES_H
 
 #include "mybus_registry.h"
 #include "inputs.hpp"
@@ -39,6 +39,9 @@ typedef struct
     Registery_t timer_permanent[OUTPUTS_NUMBER];
     Registery_t timer_sleep[OUTPUTS_NUMBER];
 } reg_module_output_t;
+
+extern reg_module_input_t reg_module_input;
+extern reg_module_output_t reg_module_output;
 
 // ---- Digital Inputs (Read-only) ----
 static constexpr uint16_t REG_ADD_INPUT_STATE[16] = {

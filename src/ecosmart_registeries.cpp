@@ -27,7 +27,7 @@ void ecosmart_registery_init()
         reg_module_output.timer_permanent[i].datatype = reg_datatype_uint16;
         reg_module_output.timer_permanent[i].size = sizeof(outputs_object[0].timer_permanent);
         reg_module_output.timer_permanent[i].ref = &outputs_object[i].timer_permanent;
-        reg_module_output.timer_permanent[i].ref = &outputs_object[i].value;
+        
 
         reg_module_output.timer_sleep[i].address = REG_ADD_OUTPUT_TIMER_SLEEP[i];
         reg_module_output.timer_sleep[i].datatype = reg_datatype_uint16;
