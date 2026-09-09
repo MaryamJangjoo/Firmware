@@ -315,7 +315,7 @@ void AppController::applyOutputsToHardware()
 bool AppController::writeLocalRegistry(uint16_t regAddr, const String& regVal)
 {
     Serial.printf("[REG] 🔍 writeLocalRegistry called: 0x%04X = '%s'\n", regAddr, regVal.c_str());
-    
+
     Registery_t* entry = findOutputRegistryEntry(regAddr);
 
     if (entry == nullptr || entry->ref == nullptr) {
@@ -323,24 +323,40 @@ bool AppController::writeLocalRegistry(uint16_t regAddr, const String& regVal)
         return false;
     }
 
-    Serial.printf("[REG] 🔍 Found entry: ref=%p, size=%u, datatype=%d\n", 
+    Serial.printf("[REG] 🔍 Found entry: ref=%p, size=%u, datatype=%d\n",
                   entry->ref, entry->size, entry->datatype);
+
     
-    
-    size_t index = 0;
     bool isState = false;
+    bool isTimer = false;
+    size_t index = 0;
+
     for (size_t i = 0; i < OUTPUTS_NUMBER; i++) {
         if (&reg_module_output.state[i] == entry) {
             isState = true;
             index = i;
-            Serial.printf("    ➡️ This is state[%zu] (address 0x%04X), current value = %d\n", 
+            Serial.printf("    ➡️ This is state[%zu] (address 0x%04X), current value = %d\n",
                           i, reg_module_output.state[i].address, outputs_object[i].value);
+            break;
+        }
+        if (&reg_module_output.timer_permanent[i] == entry) {
+            isTimer = true;
+            index = i;
+            Serial.printf("    ➡️ This is timer_permanent[%zu] (address 0x%04X), current value = %u\n",
+                          i, reg_module_output.timer_permanent[i].address, outputs_object[i].timer_permanent);
+            break;
+        }
+        if (&reg_module_output.timer_sleep[i] == entry) {
+            isTimer = true;
+            index = i;
+            Serial.printf("    ➡️ This is timer_sleep[%zu] (address 0x%04X), current value = %u\n",
+                          i, reg_module_output.timer_sleep[i].address, outputs_object[i].timer_sleep);
             break;
         }
     }
 
-    if (!isState) {
-        Serial.printf("[REG] ⏭️ Not a state register, skipping\n");
+    if (!isState && !isTimer) {
+        Serial.printf("[REG] ⏭️ Not an output/timer register, skipping\n");
         return false;
     }
 
@@ -363,18 +379,19 @@ bool AppController::writeLocalRegistry(uint16_t regAddr, const String& regVal)
         return false;
     }
 
- 
-    Serial.printf("[REG] 📊 state[%zu] old value = %d\n", index, outputs_object[index].value);
-
     memcpy(entry->ref, buf, len);
-
- 
-    Serial.printf("[REG] 📊 state[%zu] new value = %d\n", index, outputs_object[index].value);
 
     Serial.printf("[REG] ✅ 0x%04X written\n", regAddr);
 
-    Serial.println("[REG] 🔄 CALLING applyOutputsToHardware()");
-    applyOutputsToHardware();
+    if (isState) {
+        Serial.printf("[REG] 📊 state[%zu] new value = %d\n", index, outputs_object[index].value);
+        Serial.println("[REG] 🔄 CALLING applyOutputsToHardware()");
+        applyOutputsToHardware();
+    } else {
+        
+        Serial.printf("[REG] 📊 timer[%zu] stored = %u (metadata only, no hardware push)\n",
+                      index, *static_cast<uint16_t*>(entry->ref));
+    }
 
     return true;
 }

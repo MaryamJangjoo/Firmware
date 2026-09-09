@@ -41,43 +41,36 @@
 #include <Arduino.h>
 #include <stdint.h>
 
-// ---- Protocol constants ----
+
 #define MYBUS_PROTOCOL_VERSION   2
 #define MYBUS_HEADER_SIZE        16
 #define MYBUS_CRC_SIZE           4
 #define MYBUS_MIN_FRAME_SIZE     (MYBUS_HEADER_SIZE + MYBUS_CRC_SIZE) // 20
 
-// Commands
-//
-// ✅ MYBUS_CMD_READ_REGISTRY / MYBUS_CMD_WRITE_REGISTRY حذف شدند: این دو
-// ماکرو هیچ‌جای کدبیس استفاده نمی‌شدند (mybus_proto::COMMAND_REGISTRY در
-// mybus_protocol_constants.h جای آن‌ها استفاده می‌شود). نگه‌داشتن دو ماکرو
-// موازی با همان مقدار ریسک واگرایی در تغییرات آینده داشت.
+
 #define MYBUS_CMD_SET_ADDRESS     1
 #define MYBUS_CMD_WHO_IS          3
 #define MYBUS_CMD_PING            4
 
-// Flags bit positions (Table: Flags)
-#define MYBUS_FLAG_RSP_BIT   0  // 0=Request, 1=Response
-#define MYBUS_FLAG_SF_BIT    2  // 0=Success, 1=Fail (ignored in requests)
-#define MYBUS_FLAG_SCU_BIT   5  // 0=EGD message, 1=SCU message
 
-// AES-256-GCM sizes
+#define MYBUS_FLAG_RSP_BIT   0  
+#define MYBUS_FLAG_SF_BIT    2  
+#define MYBUS_FLAG_SCU_BIT   5  
+
 #define MYBUS_AES_KEY_SIZE   32
 #define MYBUS_AES_IV_SIZE    12
 #define MYBUS_AES_TAG_SIZE   16
 
-// Data types (Registry Address Map DT0-DT3 field)
 enum MyBusDataType : uint8_t {
   DT_BIT = 0, DT_UINT8 = 1, DT_UINT16 = 2, DT_UINT32 = 3,
   DT_INT8 = 4, DT_INT16 = 5, DT_INT32 = 6, DT_FLOAT = 7,
-  DT_STRING = 8, DT_JSON = 9, DT_STRUCT = 10
+  DT_STRING = 8, DT_STRUCT = 9, DT_STRUCTDT_JSON = 10
 };
 
-// Plain (unencrypted) header fields, used to build/parse a frame
+
 struct MyBusHeader {
   uint8_t  protocolVersion;
-  uint16_t length;          // filled automatically by buildFrame()
+  uint16_t length;          
   uint8_t  sequence;
   uint8_t  interfaceId;
   uint8_t  zone;
