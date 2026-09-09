@@ -39,7 +39,19 @@ Registery_t* findOutputRegistryEntry(uint16_t regAddr)
     return nullptr;
 }
 
-} // namespace
+
+Registery_t* findInputRegistryEntry(uint16_t regAddr)
+{
+    for (size_t i = 0; i < INPUTS_NUMBER; i++) {
+        if (reg_module_input.state[i].address == regAddr) {
+            Serial.printf("[REG] 🔍 Found input.state[%zu] at 0x%04X\n", i, regAddr);
+            return &reg_module_input.state[i];
+        }
+    }
+    return nullptr;
+}
+
+}
 
 
 AppController::AppController()
@@ -162,7 +174,7 @@ void AppController::initCloudManager()
 {
     Serial.println("[CLOUD] Initializing CloudManager...");
     cloudManager = new CloudManager();
-    cloudManager->setApiBaseUrl("http://192.168.88.98:3000");
+    cloudManager->setApiBaseUrl("http://192.168.88.198:3000");
 
     cloudManager->onCommand([this](const JsonDocument& cmd) {
         onCommandReceived(cmd);
@@ -585,6 +597,14 @@ bool AppController::handleCurtainRegistryWrite(uint16_t regAddr, const String& r
 bool AppController::readLocalRegistry(uint16_t regAddr, JsonDocument& outValue)
 {
     Registery_t* entry = findOutputRegistryEntry(regAddr);
+
+    // ✅ اضافه شد: اگر بین Output/Timer پیدا نشد، Digital Input‌ها را
+    // هم بگرد (0x0000-0x000F). این‌ها هم Local/Hardware register هستند
+    // و طبق Registries Map باید بدون رفتن به مسیر mYBUS ریموت جواب
+    // داده شوند.
+    if (entry == nullptr) {
+        entry = findInputRegistryEntry(regAddr);
+    }
 
     if (entry == nullptr || entry->ref == nullptr) {
         return false;

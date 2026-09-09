@@ -139,7 +139,7 @@ bool CloudStorage::createDefaultUsersFile()
 
     String hashedPassword;
 
-    if (!cryptoHashPassword("SecurePassword@2026", hashedPassword)) {
+    if (!cryptoHashPassword("SecurePassword@20266", hashedPassword)) {
         Serial.println(
             "[FS] ❌ Failed to hash default password - users.json NOT created"
         );

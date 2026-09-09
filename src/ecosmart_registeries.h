@@ -19,7 +19,6 @@ typedef enum
     reg_datatype_struct = 9,
     reg_datatype_json = 10
 } Reg_DataType_t;
-
 typedef struct
 {
     uint16_t address;
@@ -50,8 +49,8 @@ typedef struct
     Registery_t control;
     Registery_t sleep_timer;
     Registery_t station;
-    Registery_t title;   // string, R
-    Registery_t artist;  // string, R
+    Registery_t title;   
+    Registery_t artist;  
     Registery_t volume;
     Registery_t bass;
     Registery_t treble;

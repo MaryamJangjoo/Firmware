@@ -1,10 +1,9 @@
 /*
- * mybus_frame.h
  * mYBUS Protocol V2 - Binary frame builder/parser for ESP32 (device side)
  *
  * Frame layout (16-byte header, Little-Endian):
  *   0     Protocol Version   u8
- *   1-2   Length             u16   (total frame length, header+payload+crc)
+ *   1-2   Length             u16
  *   3     Sequence           u8
  *   4     Interface          u8
  *   5     Zone               u8
@@ -17,108 +16,160 @@
  *   13    Security           u8
  *   14    Compression        u8
  *   15    Command            u8
- *   16..  Payload            variable (Length - 20 bytes)
- *   last 4 CRC32             u32 (IEEE 802.3, poly 0x04C11DB7, computed over
- *                                 header+payload BEFORE encryption)
- *
- * The full plain frame (header+payload+crc) is what gets AES-256-GCM
- * encrypted before it is ever put on the wire.
- *
- * ✅ Wire format (HTTP POST body): [IV(12)][CIPHERTEXT(N)][TAG(16)]
- * This matches the backend expectation.
- *
- * ⚠️ NOTE: The actual registry payload format used on this device is built
- * directly in CloudManager::sendRegistryFrame() as [AddrLow][AddrHigh][Value],
- * WITHOUT a ValueLen byte. There used to be two helper functions here
- * (mybus_buildPayload_ReadRegistry / mybus_buildPayload_WriteRegistry) that
- * built a DIFFERENT, incompatible payload format ([RegAddr u16][ValueLen u8]
- * [RegVal]). They were never called anywhere and have been removed to avoid
- * accidental misuse. If you need a payload builder again, base it on
- * CloudManager::sendRegistryFrame's format, not the old one.
+ *   16..  Payload            variable
+ *   last 4 CRC32             u32
  */
 
 #pragma once
 #include <Arduino.h>
 #include <stdint.h>
+#include <string.h>
 
+// Constants
 
 #define MYBUS_PROTOCOL_VERSION   2
 #define MYBUS_HEADER_SIZE        16
 #define MYBUS_CRC_SIZE           4
 #define MYBUS_MIN_FRAME_SIZE     (MYBUS_HEADER_SIZE + MYBUS_CRC_SIZE) // 20
+#define MYBUS_MAX_PAYLOAD_SIZE   128
 
+// Commands
 
-#define MYBUS_CMD_SET_ADDRESS     1
-#define MYBUS_CMD_WHO_IS          3
-#define MYBUS_CMD_PING            4
+#define MYBUS_CMD_READ_REGISTRY    0x02   // Read Registry
+#define MYBUS_CMD_WRITE_REGISTRY   0x03   // Write Registry
 
+// Flags
 
-#define MYBUS_FLAG_RSP_BIT   0  
-#define MYBUS_FLAG_SF_BIT    2  
-#define MYBUS_FLAG_SCU_BIT   5  
+#define MYBUS_FLAG_RSP_BIT   0   // Response flag
+#define MYBUS_FLAG_SF_BIT    2   // Success/Fail flag (0=Success, 1=Fail)
+#define MYBUS_FLAG_SCU_BIT   5   // SCU message flag
+
+// Crypto Constants
 
 #define MYBUS_AES_KEY_SIZE   32
 #define MYBUS_AES_IV_SIZE    12
 #define MYBUS_AES_TAG_SIZE   16
 
+// Data Types (matching Registry Address Map)
+
 enum MyBusDataType : uint8_t {
-  DT_BIT = 0, DT_UINT8 = 1, DT_UINT16 = 2, DT_UINT32 = 3,
-  DT_INT8 = 4, DT_INT16 = 5, DT_INT32 = 6, DT_FLOAT = 7,
-  DT_STRING = 8, DT_STRUCT = 9, DT_STRUCTDT_JSON = 10
+    DT_BIT = 0, 
+    DT_UINT8 = 1, 
+    DT_UINT16 = 2, 
+    DT_UINT32 = 3,
+    DT_INT8 = 4, 
+    DT_INT16 = 5, 
+    DT_INT32 = 6, 
+    DT_FLOAT = 7,
+    DT_STRING = 8, 
+    DT_STRUCT = 9, 
+    DT_JSON = 10
 };
 
+// Frame Header (16 bytes)
 
 struct MyBusHeader {
-  uint8_t  protocolVersion;
-  uint16_t length;          
-  uint8_t  sequence;
-  uint8_t  interfaceId;
-  uint8_t  zone;
-  uint8_t  deviceId;
-  uint16_t requestNumber;
-  uint8_t  qos;
-  uint8_t  options;
-  uint8_t  flags;
-  uint8_t  security;
-  uint8_t  compression;
-  uint8_t  command;
+    uint8_t  protocolVersion;  // offset 0
+    uint16_t length;           // offset 1-2
+    uint8_t  sequence;         // offset 3
+    uint8_t  interfaceId;      // offset 4
+    uint8_t  zone;             // offset 5
+    uint8_t  deviceId;         // offset 6
+    uint8_t  reserved;         // offset 7 (must be 0)
+    uint16_t requestNumber;    // offset 8-9
+    uint8_t  qos;              // offset 10
+    uint8_t  options;          // offset 11
+    uint8_t  flags;            // offset 12
+    uint8_t  security;         // offset 13
+    uint8_t  compression;      // offset 14
+    uint8_t  command;          // offset 15
 };
 
-// ---- CRC32 (IEEE 802.3, poly 0x04C11DB7, reflected impl / standard zlib crc32) ----
+
+// CRC32
 uint32_t mybus_crc32(const uint8_t *data, size_t len);
 
-// ---- Frame builder ----
-// Builds the PLAIN frame (header + payload + crc) into outFrame.
-// outFrame must have capacity >= MYBUS_MIN_FRAME_SIZE + payloadLen.
-// Returns total plain frame length, or 0 on error (buffer too small).
-size_t mybus_buildFrame(MyBusHeader &hdr, const uint8_t *payload,
-                         size_t payloadLen, uint8_t *outFrame,
-                         size_t outFrameCapacity);
+// Frame Builder
 
-// ---- AES-256-GCM encrypt/decrypt of a full plain frame ----
-// key must be 32 bytes. iv (12 bytes) and tag (16 bytes) are output params
-// on encrypt, input params on decrypt.
-// outCipher must have capacity >= plainLen.
-bool mybus_encryptFrame(const uint8_t *plainFrame, size_t plainLen,
-                         const uint8_t *key /*32 bytes*/,
-                         uint8_t *outCipher, uint8_t *outIv /*12 bytes*/,
-                         uint8_t *outTag /*16 bytes*/);
+size_t mybus_buildFrame(
+    MyBusHeader &hdr,
+    const uint8_t *payload,
+    size_t payloadLen,
+    uint8_t *outFrame,
+    size_t outFrameCapacity
+);
 
-bool mybus_decryptFrame(const uint8_t *cipher, size_t cipherLen,
-                         const uint8_t *key /*32 bytes*/,
-                         const uint8_t *iv /*12 bytes*/,
-                         const uint8_t *tag /*16 bytes*/,
-                         uint8_t *outPlain);
+// Frame Parser (after decryption)
 
-// ---- Wire packing: [IV(12)][CIPHERTEXT(N)][TAG(16)] ----
-// This is the exact byte layout sent as the raw HTTP body
-// (Content-Type: application/octet-stream). Returns total bytes written.
-size_t mybus_packWireMessage(const uint8_t *iv, const uint8_t *tag,
-                              const uint8_t *cipher, size_t cipherLen,
-                              uint8_t *outWire, size_t outWireCapacity);
+bool mybus_parseFrame(
+    const uint8_t *plainFrame,
+    size_t frameLen,
+    MyBusHeader &outHdr,
+    const uint8_t **outPayload,
+    size_t *outPayloadLen
+);
 
-// ---- Parse a plain frame's header out of raw bytes (after decryption) ----
-// Returns false if buffer too short, CRC invalid, or protocol version mismatch.
-bool mybus_parseFrame(const uint8_t *plainFrame, size_t frameLen,
-                       MyBusHeader &outHdr, const uint8_t **outPayload,
-                       size_t *outPayloadLen);
+// AES-256-GCM Encryption / Decryption
+
+bool mybus_encryptFrame(
+    const uint8_t *plainFrame,
+    size_t plainLen,
+    const uint8_t *key,
+    uint8_t *outCipher,
+    uint8_t *outIv,
+    uint8_t *outTag
+);
+
+bool mybus_decryptFrame(
+    const uint8_t *cipher,
+    size_t cipherLen,
+    const uint8_t *key,
+    const uint8_t *iv,
+    const uint8_t *tag,
+    uint8_t *outPlain
+);
+
+// Wire Packing: [IV(12)][CIPHERTEXT(N)][TAG(16)]
+
+size_t mybus_packWireMessage(
+    const uint8_t *iv,
+    const uint8_t *tag,
+    const uint8_t *cipher,
+    size_t cipherLen,
+    uint8_t *outWire,
+    size_t outWireCapacity
+);
+
+// Registry Payload Builders
+
+/**
+ * Builds READ registry payload: [AddrLow][AddrHigh]
+ */
+size_t mybus_buildReadRegistryPayload(
+    uint16_t regAddr,
+    uint8_t *outPayload,
+    size_t outCapacity
+);
+
+/**
+ * Builds WRITE registry payload: [AddrLow][AddrHigh][Value...]
+ */
+size_t mybus_buildWriteRegistryPayload(
+    uint16_t regAddr,
+    const uint8_t *value,
+    size_t valueLen,
+    uint8_t *outPayload,
+    size_t outCapacity
+);
+
+/**
+ * Parses registry response payload
+ * Returns: regAddr, value pointer, value length
+ */
+bool mybus_parseRegistryPayload(
+    const uint8_t *payload,
+    size_t payloadLen,
+    uint16_t &outRegAddr,
+    const uint8_t **outValue,
+    size_t &outValueLen
+);
