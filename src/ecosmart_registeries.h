@@ -27,7 +27,11 @@ typedef struct
 
     void *ref;
     size_t size;
+
+    bool writable = false; // پیش‌فرض false: input و read-only ها دست‌نخورده می‌مونن
+    bool isString = false; // true یعنی ref یک String* است، نه بافر بایتی ثابت
 } Registery_t;
+
 typedef struct
 {
     Registery_t state[INPUTS_NUMBER];
@@ -40,8 +44,23 @@ typedef struct
     Registery_t timer_sleep[OUTPUTS_NUMBER];
 } reg_module_output_t;
 
+typedef struct
+{
+    Registery_t mode;
+    Registery_t control;
+    Registery_t sleep_timer;
+    Registery_t station;
+    Registery_t title;   // string, R
+    Registery_t artist;  // string, R
+    Registery_t volume;
+    Registery_t bass;
+    Registery_t treble;
+    Registery_t eq;
+} reg_module_audio_t;
+
 extern reg_module_input_t reg_module_input;
 extern reg_module_output_t reg_module_output;
+extern reg_module_audio_t reg_module_audio;
 
 // ---- Digital Inputs (Read-only) ----
 static constexpr uint16_t REG_ADD_INPUT_STATE[16] = {
@@ -89,6 +108,8 @@ static constexpr uint16_t REG_ADD_AUDIO_TITLE = 0x0800;       // string, R
 static constexpr uint16_t REG_ADD_AUDIO_ARTIST = 0x0801;      // string, R
 static constexpr uint16_t REG_ADD_AUDIO_VOLUME = 0x8103;      // u8
 static constexpr uint16_t REG_ADD_AUDIO_BASS = 0x8104;        // u8
+static constexpr uint16_t REG_ADD_AUDIO_TREBLE = 0x8105;      // u8
+static constexpr uint16_t REG_ADD_AUDIO_EQ = 0x8106;          // u8
 
 // ---- RGB Led Strips ----
 static constexpr uint16_t REG_ADD_RGB_MODE = 0x8107;       // u8

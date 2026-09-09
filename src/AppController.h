@@ -9,6 +9,7 @@
 #include <ArduinoJson.h>
 
 #include "CloudManager.h"
+#include "ecosmart_registeries.h"
 
 class AppController {
 public:
@@ -78,7 +79,11 @@ private:
     void onBtData(const uint8_t* data, uint32_t len);
     static void btDataTrampoline(const uint8_t* data, uint32_t len);
 
-    bool handleAudioRegistryWrite(uint16_t regAddr, const String& regVal);
+    // ---- Audio registry (Registery_t-based, reg_module_audio) ----
+    Registery_t* findAudioRegistryEntry(uint16_t regAddr);
+    bool readAudioRegistry(uint16_t regAddr, JsonDocument& outValue);
+    bool writeAudioRegistry(uint16_t regAddr, const String& regVal);
+
     bool handleCurtainRegistryWrite(uint16_t regAddr, const String& regVal);
     String getRegistryValue(uint16_t regAddr);  
     bool readLocalRegistry(uint16_t regAddr, JsonDocument& outValue);

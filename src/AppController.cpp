@@ -1,6 +1,7 @@
 #include "AppController.h"
 #include <esp_system.h>
 #include "ecosmart_registeries.h"
+#include "audio.hpp"
 #include "crypto.hpp"
 #include <WiFi.h>
 #include "mybus_value_codec.h"
@@ -38,7 +39,8 @@ Registery_t* findOutputRegistryEntry(uint16_t regAddr)
     return nullptr;
 }
 
-} 
+} // namespace
+
 
 AppController::AppController()
     : amp(&Wire),
@@ -167,11 +169,13 @@ void AppController::initCloudManager()
     });
 
     cloudManager->onLocalRegistryRead([this](uint16_t regAddr, JsonDocument& outValue) {
+        if (readAudioRegistry(regAddr, outValue)) return true;
         return readLocalRegistry(regAddr, outValue);
     });
 
-    cloudManager->onShouldSkipMybusWrite([](uint16_t regAddr) {
-        return findOutputRegistryEntry(regAddr) != nullptr;
+    cloudManager->onShouldSkipMybusWrite([this](uint16_t regAddr) {
+        return findAudioRegistryEntry(regAddr) != nullptr
+            || findOutputRegistryEntry(regAddr) != nullptr;
     });
 
     Serial.println("[CLOUD] CloudManager initialized successfully");
@@ -432,60 +436,136 @@ void AppController::btDataTrampoline(const uint8_t* data, uint32_t len)
 }
 
 
-bool AppController::handleAudioRegistryWrite(uint16_t regAddr, const String& regVal)
+// ============================================================
+// Audio registry (reg_module_audio, Registery_t-based)
+// ============================================================
+
+Registery_t* AppController::findAudioRegistryEntry(uint16_t regAddr)
 {
-    if (regAddr == REG_ADD_AUDIO_VOLUME) {
-        int vol = regVal.toInt();
-        vol = constrain(vol, 0, 100);
-        esp_err_t ret = tas5805m_set_volume_pct((uint8_t)vol);
-        Serial.printf("[AUDIO] Volume -> %d%% (%s)\n", vol, ret == ESP_OK ? "OK" : "FAIL");
-        return ret == ESP_OK;
+    Registery_t* candidates[] = {
+        &reg_module_audio.mode,
+        &reg_module_audio.control,
+        &reg_module_audio.sleep_timer,
+        &reg_module_audio.station,
+        &reg_module_audio.title,
+        &reg_module_audio.artist,
+        &reg_module_audio.volume,
+        &reg_module_audio.bass,
+        &reg_module_audio.treble,
+        &reg_module_audio.eq
+    };
+
+    for (auto* entry : candidates) {
+        if (entry->address == regAddr) {
+            return entry;
+        }
+    }
+    return nullptr;
+}
+
+bool AppController::readAudioRegistry(uint16_t regAddr, JsonDocument& outValue)
+{
+    Registery_t* entry = findAudioRegistryEntry(regAddr);
+    if (entry == nullptr || entry->ref == nullptr) {
+        return false;
     }
 
-    if (regAddr == REG_ADD_AUDIO_CONTROL) {
-        int cmd = regVal.toInt();
-        Serial.printf("[AUDIO] Control command: %d\n", cmd);
-        switch (cmd) {
-            case 1:  // Play / Reconnect
-                bta.reconnect();
-                Serial.println("[AUDIO] ▶️ Play / Reconnect");
+    if (entry->isString) {
+        outValue["value"] = *static_cast<String*>(entry->ref);
+    } else {
+        switch (entry->datatype) {
+            case reg_datatype_uint8:
+                outValue["value"] = *static_cast<uint8_t*>(entry->ref);
                 break;
-            case 0:  // Pause
-            case 2:  // Stop
-                Serial.printf("[AUDIO] ⏸️ Command %d received (not fully implemented)\n", cmd);
+            case reg_datatype_uint16:
+                outValue["value"] = *static_cast<uint16_t*>(entry->ref);
                 break;
             default:
                 return false;
         }
-        return true;
     }
 
-    if (regAddr == REG_ADD_AUDIO_BASS) {
-        int bass = regVal.toInt();
-        bass = constrain(bass, 0, 100);
-        Serial.printf("[AUDIO] Bass -> %d%% (not wired)\n", bass);
-        return true;
+    outValue["regAddr"] = regAddr;
+    return true;
+}
+
+bool AppController::writeAudioRegistry(uint16_t regAddr, const String& regVal)
+{
+    Registery_t* entry = findAudioRegistryEntry(regAddr);
+    if (entry == nullptr || entry->ref == nullptr) {
+        return false;
     }
 
-    if (regAddr == REG_ADD_AUDIO_MODE) {
-        int mode = regVal.toInt();
-        Serial.printf("[AUDIO] Audio mode -> %d (not wired)\n", mode);
-        return true;
+    if (!entry->writable) {
+        Serial.printf("[AUDIO] ❌ 0x%04X read-only است\n", regAddr);
+        return false;
     }
 
-    if (regAddr == REG_ADD_AUDIO_STATION) {
-        int station = regVal.toInt();
-        Serial.printf("[AUDIO] Station -> %d (not wired)\n", station);
-        return true;
+    if (entry->isString) {
+        *static_cast<String*>(entry->ref) = regVal;
+    } else {
+        uint8_t buf[8];
+        size_t len = 0;
+
+        if (!encodeRegValueString(regVal, static_cast<MyBusDataType>(entry->datatype),
+                                   buf, sizeof(buf), len)) {
+            Serial.printf("[AUDIO] ❌ Parse شکست خورد: '%s'\n", regVal.c_str());
+            return false;
+        }
+
+        if (len != entry->size) {
+            Serial.printf("[AUDIO] ❌ Size mismatch در 0x%04X\n", regAddr);
+            return false;
+        }
+
+        // ⚠️ بدون spinlock: نوشتن از WebSocket task می‌آید، خواندن از
+        // loop() یا مسیر GET_REGISTRY. برخلاف LocalRegisterMap محافظت ندارد.
+        memcpy(entry->ref, buf, len);
     }
 
-    if (regAddr == REG_ADD_AUDIO_SLEEP_TIMER) {
-        int timer = regVal.toInt();
-        Serial.printf("[AUDIO] Sleep timer -> %d min (not wired)\n", timer);
-        return true;
+    // ---- Side effects (معادل handleAudioRegistryWrite قدیمی) ----
+    if (regAddr == REG_ADD_AUDIO_VOLUME) {
+        uint8_t vol = audio_object.volume;
+        if (vol > 124) vol = 124;
+        esp_err_t ret = tas5805m_set_volume_pct(vol);
+        Serial.printf("[AUDIO] Volume -> %u%% (%s)\n", vol, ret == ESP_OK ? "OK" : "FAIL");
+
+    } else if (regAddr == REG_ADD_AUDIO_CONTROL) {
+        switch (audio_object.control) {
+            case 1:
+                bta.reconnect();
+                Serial.println("[AUDIO] ▶️ Play / Reconnect");
+                break;
+            case 0:
+            case 2:
+                Serial.printf("[AUDIO] ⏸️ Command %u (Stop/Pause pending btAudio API verification)\n",
+                              audio_object.control);
+                break;
+            default:
+                Serial.printf("[AUDIO] ⚠️ Unknown control command: %u\n", audio_object.control);
+                break;
+        }
+
+    } else if (regAddr == REG_ADD_AUDIO_BASS) {
+        Serial.printf("[AUDIO] Bass -> %u (not wired)\n", audio_object.bass);
+
+    } else if (regAddr == REG_ADD_AUDIO_TREBLE) {
+        Serial.printf("[AUDIO] Treble -> %u (not wired)\n", audio_object.treble);
+
+    } else if (regAddr == REG_ADD_AUDIO_EQ) {
+        Serial.printf("[AUDIO] EQ -> %u (not wired)\n", audio_object.eq);
+
+    } else if (regAddr == REG_ADD_AUDIO_MODE) {
+        Serial.printf("[AUDIO] Mode -> %u (not wired)\n", audio_object.mode);
+
+    } else if (regAddr == REG_ADD_AUDIO_STATION) {
+        Serial.printf("[AUDIO] Station -> %u (not wired)\n", audio_object.station);
+
+    } else if (regAddr == REG_ADD_AUDIO_SLEEP_TIMER) {
+        Serial.printf("[AUDIO] Sleep timer -> %u min (not wired)\n", audio_object.sleep_timer);
     }
 
-    return false;
+    return true;
 }
 
 
@@ -584,7 +664,7 @@ void AppController::onCommandReceived(const JsonDocument& command)
         Serial.printf("[CMD] Get registry: 0x%04X\n", regAddr);
 
         JsonDocument localValue;
-        if (readLocalRegistry(regAddr, localValue)) {
+        if (readAudioRegistry(regAddr, localValue) || readLocalRegistry(regAddr, localValue)) {
             Serial.println("[CMD] ✅ Local registry read:");
             serializeJson(localValue, Serial);
             Serial.println();
@@ -643,7 +723,7 @@ void AppController::onCommandReceived(const JsonDocument& command)
             Serial.printf("[CMD] 🔍 No entry found for 0x%04X in registry\n", regAddr);
         }
 
-        bool handledLocally = handleAudioRegistryWrite(regAddr, regVal)
+        bool handledLocally = writeAudioRegistry(regAddr, regVal)
                             || handleCurtainRegistryWrite(regAddr, regVal)
                             || writeLocalRegistry(regAddr, regVal);
 
@@ -653,7 +733,9 @@ void AppController::onCommandReceived(const JsonDocument& command)
             Serial.println("[CMD] ℹ️ Register not part of Phase-1 map - ignored locally");
         }
 
-        const bool isLocalOutputRegister = (findOutputRegistryEntry(regAddr) != nullptr);
+        const bool isLocalOutputRegister =
+            findAudioRegistryEntry(regAddr) != nullptr ||
+            findOutputRegistryEntry(regAddr) != nullptr;
 
         if (!isLocalOutputRegister &&
             cloudManager != nullptr &&
