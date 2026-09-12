@@ -5,6 +5,9 @@
 #include <esp_system.h>
 #include <vector>
 
+#include "mybus_frame.h"
+#include "mybus_protocol_constants.h"
+#include "CloudStorage.h"
 // ============================================================
 // Constructor
 // ============================================================
@@ -95,10 +98,47 @@ void CloudWebSocketServer::start()
 
     server_->addHandler(ws_);
 
+    static constexpr const char* FIRMWARE_VERSION = "2.0.0";       
+    static constexpr const char* PART_NUMBER      = "SEC-BLB56001"; 
+    server_->on("/info", HTTP_GET, [this](AsyncWebServerRequest *request) {
+
+        AsyncResponseStream *response =
+            request->beginResponseStream("application/json");
+
+        JsonDocument doc;
+        JsonObject root = doc.to<JsonObject>();
+
+        root["deviceId"]        = deviceId_;
+        root["cloudConnected"]  = connected_;
+
+        
+        char serialHex[9];
+        snprintf(serialHex, sizeof(serialHex), "%08X",
+                  static_cast<uint32_t>(ESP.getEfuseMac() & 0xFFFFFFFFu));
+        root["serialNumber"]    = String(serialHex);
+
+        root["partNumber"]      = PART_NUMBER;
+        root["firmwareVersion"] = FIRMWARE_VERSION;
+
+        root["uptime"]   = millis() / 1000;
+
+        root["ramTotal"] = ESP.getHeapSize();
+        root["ramFree"]  = ESP.getFreeHeap();
+
+        root["storageTotal"] = storage_.getStorageTotalBytes();
+        root["storageUsed"]  = storage_.getStorageUsedBytes();
+
+        root["wifiRSSI"] = WiFi.RSSI();
+
+        serializeJson(root, *response);
+        request->send(response);
+    });
+
     server_->begin();
 
     Serial.println("[WS] WebSocket server started");
     Serial.println("[WS] Path: /ws");
+    Serial.println("[WS] HTTP: GET /info (binary frame)");
 }
 
 // ============================================================

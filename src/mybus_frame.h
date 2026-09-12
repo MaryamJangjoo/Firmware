@@ -173,3 +173,57 @@ bool mybus_parseRegistryPayload(
     const uint8_t **outValue,
     size_t &outValueLen
 );
+
+// ============================================================
+// Incoming Frame Validation
+//
+// اعتبارسنجی یک فریم خام (رمزگشایی‌شده/رمزنگاری‌نشده) دقیقاً طبق مراحل زیر:
+// 1. دریافت آرایه بایت
+// 2. چک نسخه پروتکل
+// 3. چک حداقل طول بسته
+// 4. چک CRC32   (پیش‌نیاز فنی: تطبیق length اعلام‌شده با طول واقعی)
+// 5. چک اینترفیس
+// 6. چک پرچم‌ها (بیت‌های رزرو باید صفر باشند)
+// 7. چک Command (فقط در لیست مجاز)
+// ============================================================
+
+// لیست کدهای مجاز برای فریم‌های ورودی.
+//
+// ⚠️ توجه: پیاده‌سازی فعلی MybusTransport::sendRegistryFrame همیشه کد
+// mybus_proto::COMMAND_REGISTRY (=2) را چه برای Read چه برای Write می‌فرستد؛
+// کدهای MYBUS_CMD_READ_REGISTRY(0x02)/MYBUS_CMD_WRITE_REGISTRY(0x03) در این
+// آرایه صرفاً برای مواقعی است که این تفکیک روی سیم واقعاً پیاده شود. تا آن
+// زمان، چون هر دو مقدار در عمل با 2 برابرند، این لیست همان یک کد را پوشش
+// می‌دهد.
+static constexpr uint8_t MYBUS_ALLOWED_COMMANDS[] = {
+    MYBUS_CMD_READ_REGISTRY,   // 0x02
+    MYBUS_CMD_WRITE_REGISTRY,  // 0x03
+};
+static constexpr size_t MYBUS_ALLOWED_COMMANDS_COUNT =
+    sizeof(MYBUS_ALLOWED_COMMANDS) / sizeof(MYBUS_ALLOWED_COMMANDS[0]);
+
+enum class MyBusFrameError : uint8_t {
+    NONE = 0,
+    EMPTY_FRAME,
+    PROTOCOL_VERSION_MISMATCH,
+    FRAME_TOO_SHORT,
+    LENGTH_FIELD_MISMATCH,
+    CRC_MISMATCH,
+    INTERFACE_MISMATCH,
+    RESERVED_FLAG_SET,
+    COMMAND_NOT_ALLOWED
+};
+
+const char* mybus_frameErrorToString(MyBusFrameError err);
+
+bool mybus_validateFrame(
+    const uint8_t* frame,
+    size_t frameLen,
+    uint8_t expectedInterfaceId,
+    const uint8_t* allowedCommands,
+    size_t allowedCommandsCount,
+    MyBusHeader& outHdr,
+    const uint8_t** outPayload,
+    size_t* outPayloadLen,
+    MyBusFrameError& outError
+);

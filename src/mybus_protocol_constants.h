@@ -34,6 +34,6 @@ constexpr uint8_t COMMAND_REGISTRY =
 constexpr uint8_t INTERFACE_WIFI =
     1;
 
-} // namespace mybus_proto
+}
 
 #endif

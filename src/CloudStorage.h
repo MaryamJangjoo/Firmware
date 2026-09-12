@@ -8,11 +8,6 @@
 struct UserInfo {
     String username;
 
-    // ✅ این فیلد دیگر پسورد خام نیست. از این پس فرمت آن
-    // "saltHex$hashHex" است (خروجی cryptoHashPassword در
-    // crypto.hpp/.cpp). نام فیلد به‌عمد passwordHash نگه داشته شده
-    // چون قبلاً هم همین نام استفاده می‌شد و تغییر نامش نیازی به
-    // تغییر ساختار users.json ندارد.
     String passwordHash;
 
     String publicKey;
@@ -48,6 +43,9 @@ public:
 
     bool createDefaultUsersFile();
     bool createDefaultSiteInfoFile();
+    
+    size_t getStorageTotalBytes();
+    size_t getStorageUsedBytes();
 
 private:
     bool mounted_ = false;

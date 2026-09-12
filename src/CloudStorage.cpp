@@ -316,3 +316,24 @@ bool CloudStorage::loginOffline(const String& username, const String& password)
     if (username.isEmpty() || password.isEmpty()) return false;
     return verifyUserPassword(username, password);
 }
+size_t CloudStorage::getStorageTotalBytes()
+{
+    if (!mounted_ && !init()) return 0;
+
+#ifdef USE_LittleFS
+    return LittleFS.totalBytes();
+#else
+    return SPIFFS.totalBytes();
+#endif
+}
+
+size_t CloudStorage::getStorageUsedBytes()
+{
+    if (!mounted_ && !init()) return 0;
+
+#ifdef USE_LittleFS
+    return LittleFS.usedBytes();
+#else
+    return SPIFFS.usedBytes();
+#endif
+}

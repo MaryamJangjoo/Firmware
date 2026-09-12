@@ -205,7 +205,7 @@ size_t mybus_buildReadRegistryPayload(
     uint16_t regAddr,
     uint8_t *outPayload,
     size_t outCapacity) {
-    
+
     if (outCapacity < 2) return 0;
 
     // [AddrLow][AddrHigh]
@@ -221,7 +221,7 @@ size_t mybus_buildWriteRegistryPayload(
     size_t valueLen,
     uint8_t *outPayload,
     size_t outCapacity) {
-    
+
     size_t totalLen = 2 + valueLen;
     if (totalLen > outCapacity) return 0;
 
@@ -251,6 +251,130 @@ bool mybus_parseRegistryPayload(
     // Value starts at byte 2
     outValueLen = payloadLen - 2;
     *outValue = (outValueLen > 0) ? (payload + 2) : nullptr;
+
+    return true;
+}
+
+// ============================================================
+// Incoming Frame Validation
+// ============================================================
+
+const char* mybus_frameErrorToString(MyBusFrameError err) {
+    switch (err) {
+        case MyBusFrameError::NONE:                       return "OK";
+        case MyBusFrameError::EMPTY_FRAME:                return "Empty frame";
+        case MyBusFrameError::PROTOCOL_VERSION_MISMATCH:  return "Protocol version mismatch";
+        case MyBusFrameError::FRAME_TOO_SHORT:            return "Frame shorter than minimum size";
+        case MyBusFrameError::LENGTH_FIELD_MISMATCH:      return "Declared length != actual length";
+        case MyBusFrameError::CRC_MISMATCH:               return "CRC32 mismatch";
+        case MyBusFrameError::INTERFACE_MISMATCH:         return "Interface mismatch";
+        case MyBusFrameError::RESERVED_FLAG_SET:          return "Reserved flag bit is set";
+        case MyBusFrameError::COMMAND_NOT_ALLOWED:        return "Command not allowed (only Read/Write Registry)";
+        default:                                          return "Unknown error";
+    }
+}
+
+bool mybus_validateFrame(
+    const uint8_t* frame,
+    size_t frameLen,
+    uint8_t expectedInterfaceId,
+    const uint8_t* allowedCommands,
+    size_t allowedCommandsCount,
+    MyBusHeader& outHdr,
+    const uint8_t** outPayload,
+    size_t* outPayloadLen,
+    MyBusFrameError& outError)
+{
+    outError = MyBusFrameError::NONE;
+    if (outPayload)    *outPayload = nullptr;
+    if (outPayloadLen) *outPayloadLen = 0;
+
+    // ---- 1. دریافت آرایه بایت ----
+    if (frame == nullptr || frameLen == 0) {
+        outError = MyBusFrameError::EMPTY_FRAME;
+        return false;
+    }
+
+    // ---- 2. چک نسخه پروتکل (آفست 0، فقط 1 بایت لازم است) ----
+    if (frame[0] != MYBUS_PROTOCOL_VERSION) {
+        outError = MyBusFrameError::PROTOCOL_VERSION_MISMATCH;
+        return false;
+    }
+
+    // ---- 3. چک حداقل طول بسته ----
+    if (frameLen < MYBUS_MIN_FRAME_SIZE) {
+        outError = MyBusFrameError::FRAME_TOO_SHORT;
+        return false;
+    }
+
+    const uint16_t declaredLen = getU16LE(frame + 1);
+
+    if (declaredLen != frameLen) {
+        outError = MyBusFrameError::LENGTH_FIELD_MISMATCH;
+        return false;
+    }
+
+    const size_t payloadLen = frameLen - MYBUS_MIN_FRAME_SIZE;
+
+    // ---- 4. چک CRC32 ----
+    const uint32_t expectedCrc =
+        mybus_crc32(frame, MYBUS_HEADER_SIZE + payloadLen);
+
+    const uint32_t actualCrc =
+        getU32LE(frame + MYBUS_HEADER_SIZE + payloadLen);
+
+    if (expectedCrc != actualCrc) {
+        outError = MyBusFrameError::CRC_MISMATCH;
+        return false;
+    }
+
+    // ---- هدر را پر کن (فریم تا اینجا معتبر است) ----
+    outHdr.protocolVersion = frame[0];
+    outHdr.length          = declaredLen;
+    outHdr.sequence        = frame[3];
+    outHdr.interfaceId     = frame[4];
+    outHdr.zone            = frame[5];
+    outHdr.deviceId        = frame[6];
+    outHdr.reserved        = frame[7];
+    outHdr.requestNumber   = getU16LE(frame + 8);
+    outHdr.qos             = frame[10];
+    outHdr.options         = frame[11];
+    outHdr.flags           = frame[12];
+    outHdr.security        = frame[13];
+    outHdr.compression     = frame[14];
+    outHdr.command         = frame[15];
+
+    // ---- 5. چک اینترفیس ----
+    if (outHdr.interfaceId != expectedInterfaceId) {
+        outError = MyBusFrameError::INTERFACE_MISMATCH;
+        return false;
+    }
+
+    // ---- 6. چک پرچم‌ها (بیت‌های RSV طبق مستند پروتکل: 7،4،3،1 باید صفر باشند) ----
+    static constexpr uint8_t MYBUS_FLAGS_RESERVED_MASK =
+        (1U << 7) | (1U << 4) | (1U << 3) | (1U << 1);
+
+    if ((outHdr.flags & MYBUS_FLAGS_RESERVED_MASK) != 0) {
+        outError = MyBusFrameError::RESERVED_FLAG_SET;
+        return false;
+    }
+
+    // ---- 7. چک Command (فقط در لیست مجاز) ----
+    bool commandAllowed = false;
+    for (size_t i = 0; i < allowedCommandsCount; ++i) {
+        if (outHdr.command == allowedCommands[i]) {
+            commandAllowed = true;
+            break;
+        }
+    }
+
+    if (!commandAllowed) {
+        outError = MyBusFrameError::COMMAND_NOT_ALLOWED;
+        return false;
+    }
+
+    if (outPayload)    *outPayload    = (payloadLen > 0) ? (frame + MYBUS_HEADER_SIZE) : nullptr;
+    if (outPayloadLen) *outPayloadLen = payloadLen;
 
     return true;
 }

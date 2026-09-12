@@ -18,7 +18,7 @@ String generateDeviceId()
     snprintf(
         buffer,
         sizeof(buffer),
-        "ESP32_ECOSMART_%012llX",
+        "ECOSMART_%012llX",
         static_cast<unsigned long long>(mac)
     );
 
@@ -62,6 +62,10 @@ CloudManager::CloudManager()
             "[CLOUD] ❌ Preferences begin failed"
         );
     }
+    preferences_.remove("deviceId");
+    preferences_.remove("mybusDev");
+    preferences_.remove("mybusZone");
+    Serial.println("[CLOUD] 🗑️ Old deviceId/mybusDev/mybusZone removed from Preferences");
 
 
 
@@ -639,8 +643,7 @@ void CloudManager::setDeviceId(
         deviceId_
     );
 
-    // ✅ هر جا از بیرون deviceId عوض شود (مثلاً برای اجبار به یک ID
-    // قدیمی/خاص)، باید mybusSession_ هم بلافاصله sync شود.
+   
     mybusSession_.setDeviceId(
         deviceId_
     );
