@@ -1,0 +1,724 @@
+<!DOCTYPE html>
+<html lang="fa" dir="rtl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>mYBUS Frame Decoder</title>
+    <style>
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, sans-serif;
+            background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
+            color: #eee;
+            min-height: 100vh;
+            padding: 20px;
+        }
+
+        .container {
+            max-width: 1000px;
+            margin: 0 auto;
+        }
+
+        h1 {
+            text-align: center;
+            color: #00d4ff;
+            margin-bottom: 10px;
+            font-size: 2em;
+        }
+
+        .subtitle {
+            text-align: center;
+            color: #888;
+            margin-bottom: 30px;
+            font-size: 0.9em;
+        }
+
+        .card {
+            background: rgba(255, 255, 255, 0.05);
+            border: 1px solid rgba(0, 212, 255, 0.2);
+            border-radius: 12px;
+            padding: 20px;
+            margin-bottom: 20px;
+            backdrop-filter: blur(10px);
+        }
+
+        .card h2 {
+            color: #00d4ff;
+            margin-bottom: 15px;
+            font-size: 1.2em;
+            border-bottom: 1px solid rgba(0, 212, 255, 0.2);
+            padding-bottom: 10px;
+        }
+
+        input[type="text"], textarea {
+            width: 100%;
+            padding: 12px;
+            background: rgba(0, 0, 0, 0.3);
+            border: 1px solid rgba(0, 212, 255, 0.3);
+            border-radius: 8px;
+            color: #fff;
+            font-family: 'Courier New', monospace;
+            font-size: 14px;
+            direction: ltr;
+            text-align: left;
+        }
+
+        input[type="text"]:focus, textarea:focus {
+            outline: none;
+            border-color: #00d4ff;
+            box-shadow: 0 0 10px rgba(0, 212, 255, 0.3);
+        }
+
+        button {
+            background: linear-gradient(135deg, #00d4ff, #0099cc);
+            color: #000;
+            border: none;
+            padding: 12px 24px;
+            border-radius: 8px;
+            font-size: 16px;
+            font-weight: bold;
+            cursor: pointer;
+            margin-top: 10px;
+            transition: transform 0.2s, box-shadow 0.2s;
+        }
+
+        button:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 5px 20px rgba(0, 212, 255, 0.4);
+        }
+
+        button:active {
+            transform: translateY(0);
+        }
+
+        .btn-group {
+            display: flex;
+            gap: 10px;
+            flex-wrap: wrap;
+        }
+
+        .btn-secondary {
+            background: rgba(255, 255, 255, 0.1);
+            color: #00d4ff;
+            border: 1px solid rgba(0, 212, 255, 0.3);
+        }
+
+        .btn-secondary:hover {
+            background: rgba(0, 212, 255, 0.1);
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 10px;
+        }
+
+        th, td {
+            padding: 10px 12px;
+            text-align: left;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+            font-size: 14px;
+        }
+
+        th {
+            color: #00d4ff;
+            font-weight: bold;
+            background: rgba(0, 212, 255, 0.05);
+        }
+
+        tr:hover {
+            background: rgba(0, 212, 255, 0.05);
+        }
+
+        .value {
+            font-family: 'Courier New', monospace;
+            color: #ffcc00;
+            direction: ltr;
+        }
+
+        .hex-dump {
+            font-family: 'Courier New', monospace;
+            background: rgba(0, 0, 0, 0.4);
+            padding: 15px;
+            border-radius: 8px;
+            direction: ltr;
+            text-align: left;
+            font-size: 13px;
+            line-height: 1.8;
+            overflow-x: auto;
+            white-space: pre;
+        }
+
+        .hex-dump .offset {
+            color: #666;
+        }
+
+        .hex-dump .byte {
+            color: #00d4ff;
+        }
+
+        .hex-dump .ascii {
+            color: #ffcc00;
+        }
+
+        .hex-dump .highlight {
+            background: rgba(0, 212, 255, 0.3);
+            border-radius: 3px;
+            padding: 1px 2px;
+        }
+
+        .status-pass {
+            color: #00ff88;
+            font-weight: bold;
+        }
+
+        .status-fail {
+            color: #ff4466;
+            font-weight: bold;
+        }
+
+        .status-warn {
+            color: #ffcc00;
+            font-weight: bold;
+        }
+
+        .grid-2 {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 15px;
+        }
+
+        @media (max-width: 600px) {
+            .grid-2 {
+                grid-template-columns: 1fr;
+            }
+        }
+
+        .info-box {
+            background: rgba(0, 212, 255, 0.1);
+            border-left: 3px solid #00d4ff;
+            padding: 10px 15px;
+            border-radius: 5px;
+            margin-top: 10px;
+            font-size: 0.9em;
+        }
+
+        .error-box {
+            background: rgba(255, 68, 102, 0.1);
+            border-left: 3px solid #ff4466;
+            padding: 10px 15px;
+            border-radius: 5px;
+            margin-top: 10px;
+            font-size: 0.9em;
+        }
+
+        .tag {
+            display: inline-block;
+            padding: 2px 8px;
+            border-radius: 4px;
+            font-size: 0.8em;
+            font-weight: bold;
+        }
+
+        .tag-ok {
+            background: rgba(0, 255, 136, 0.2);
+            color: #00ff88;
+        }
+
+        .tag-err {
+            background: rgba(255, 68, 102, 0.2);
+            color: #ff4466;
+        }
+
+        .tag-warn {
+            background: rgba(255, 204, 0, 0.2);
+            color: #ffcc00;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🔍 mYBUS Frame Decoder</h1>
+        <p class="subtitle">ابزار دیکد فریم‌های mYBUS Protocol v2</p>
+
+        <!-- Input Section -->
+        <div class="card">
+            <h2>📥 ورودی فریم</h2>
+            <input type="text" id="frameInput" 
+                   placeholder="مثال: 021600000101010001000000200200020507c776af7b"
+                   value="021600000101010001000000200200020507c776af7b">
+            <div class="btn-group">
+                <button onclick="decodeFrame()">🔍 دیکد کن</button>
+                <button class="btn-secondary" onclick="pasteFromClipboard()">📋 پیست</button>
+                <button class="btn-secondary" onclick="clearInput()">🗑️ پاک کن</button>
+                <button class="btn-secondary" onclick="loadExample()">📖 مثال</button>
+            </div>
+        </div>
+
+        <!-- Header Section -->
+        <div class="card" id="headerCard" style="display:none;">
+            <h2>📋 Header (16 bytes)</h2>
+            <table id="headerTable">
+                <thead>
+                    <tr>
+                        <th>فیلد</th>
+                        <th>Offset</th>
+                        <th>مقدار</th>
+                        <th>توضیح</th>
+                    </tr>
+                </thead>
+                <tbody id="headerBody"></tbody>
+            </table>
+        </div>
+
+        <!-- Payload Section -->
+        <div class="card" id="payloadCard" style="display:none;">
+            <h2>📦 Payload</h2>
+            <div id="payloadContent"></div>
+        </div>
+
+        <!-- CRC Section -->
+        <div class="card" id="crcCard" style="display:none;">
+            <h2>🔐 CRC32</h2>
+            <div id="crcContent"></div>
+        </div>
+
+        <!-- Hex Dump Section -->
+        <div class="card" id="hexCard" style="display:none;">
+            <h2>🔢 Hex Dump</h2>
+            <div class="hex-dump" id="hexDump"></div>
+        </div>
+
+        <!-- Analysis Section -->
+        <div class="card" id="analysisCard" style="display:none;">
+            <h2>📊 تحلیل</h2>
+            <div id="analysisContent"></div>
+        </div>
+    </div>
+
+    <script>
+        // ============================================================
+        // CRC32 (IEEE 802.3)
+        // ============================================================
+        const crc32Table = (() => {
+            const table = new Uint32Array(256);
+            for (let i = 0; i < 256; i++) {
+                let c = i;
+                for (let k = 0; k < 8; k++) {
+                    c = (c & 1) ? (0xEDB88320 ^ (c >>> 1)) : (c >>> 1);
+                }
+                table[i] = c;
+            }
+            return table;
+        })();
+
+        function crc32(bytes) {
+            let crc = 0xFFFFFFFF;
+            for (let i = 0; i < bytes.length; i++) {
+                crc = crc32Table[(crc ^ bytes[i]) & 0xFF] ^ (crc >>> 8);
+            }
+            return (crc ^ 0xFFFFFFFF) >>> 0;
+        }
+
+        // ============================================================
+        // Constants
+        // ============================================================
+        const COMMANDS = {
+            0: 'INVALID',
+            1: 'SET_ADDRESS',
+            2: 'READ_REGISTRY',
+            3: 'WRITE_REGISTRY',
+            4: 'PING',
+            5: 'WHO_IS'
+        };
+
+        const INTERFACES = {
+            0: 'SCU',
+            1: 'WiFi',
+            2: 'Ethernet',
+            3: 'Serial',
+            4: 'PLC',
+            5: 'KNX',
+            6: 'Radio'
+        };
+
+        const DATA_TYPES = {
+            0: 'BIT',
+            1: 'UINT8',
+            2: 'UINT16',
+            3: 'UINT32',
+            4: 'INT8',
+            5: 'INT16',
+            6: 'INT32',
+            7: 'FLOAT',
+            8: 'STRING',
+            9: 'STRUCT',
+            10: 'JSON'
+        };
+
+        // ============================================================
+        // Decoder
+        // ============================================================
+        function decodeFrame() {
+            const input = document.getElementById('frameInput').value.trim();
+            
+            // حذف فاصله‌ها و کاراکترهای اضافی
+            const hexStr = input.replace(/[\s\-:]/g, '');
+            
+            if (!/^[0-9a-fA-F]+$/.test(hexStr)) {
+                alert('❌ ورودی معتبر نیست. فقط کاراکترهای hex مجازند.');
+                return;
+            }
+            
+            if (hexStr.length % 2 !== 0) {
+                alert('❌ تعداد کاراکترها باید زوج باشد.');
+                return;
+            }
+            
+            const bytes = new Uint8Array(hexStr.length / 2);
+            for (let i = 0; i < bytes.length; i++) {
+                bytes[i] = parseInt(hexStr.substr(i * 2, 2), 16);
+            }
+            
+            if (bytes.length < 20) {
+                alert('❌ فریم خیلی کوتاه است (حداقل ۲۰ بایت).');
+                return;
+            }
+            
+            // Parse header
+            const hdr = {
+                protocolVersion: bytes[0],
+                length: bytes[1] | (bytes[2] << 8),
+                sequence: bytes[3],
+                interfaceId: bytes[4],
+                zone: bytes[5],
+                deviceId: bytes[6],
+                reserved: bytes[7],
+                requestNumber: bytes[8] | (bytes[9] << 8),
+                qos: bytes[10],
+                options: bytes[11],
+                flags: bytes[12],
+                security: bytes[13],
+                compression: bytes[14],
+                command: bytes[15]
+            };
+            
+            // Payload
+            const payloadLen = Math.max(0, bytes.length - 20);
+            const payload = bytes.slice(16, 16 + payloadLen);
+            
+            // CRC
+            const crcReceived = (bytes[bytes.length - 4] | 
+                                (bytes[bytes.length - 3] << 8) |
+                                (bytes[bytes.length - 2] << 16) |
+                                (bytes[bytes.length - 1] << 24)) >>> 0;
+            const crcCalculated = crc32(bytes.slice(0, bytes.length - 4));
+            
+            // Render
+            renderHeader(hdr, bytes.length);
+            renderPayload(hdr, payload);
+            renderCRC(crcReceived, crcCalculated, bytes);
+            renderHexDump(bytes);
+            renderAnalysis(hdr, payload, bytes, crcReceived, crcCalculated);
+            
+            // Show cards
+            document.getElementById('headerCard').style.display = 'block';
+            document.getElementById('payloadCard').style.display = 'block';
+            document.getElementById('crcCard').style.display = 'block';
+            document.getElementById('hexCard').style.display = 'block';
+            document.getElementById('analysisCard').style.display = 'block';
+        }
+
+        // ============================================================
+        // Render Header
+        // ============================================================
+        function renderHeader(hdr, actualLen) {
+            const rows = [
+                ['Protocol Version', '0', hdr.protocolVersion, 
+                 hdr.protocolVersion === 2 ? '✅ mYBUS v2' : '❌ نسخه نامعتبر'],
+                ['Length', '1-2', hdr.length, 
+                 hdr.length === actualLen ? '✅ مطابق' : `⚠️ واقعی: ${actualLen}`],
+                ['Sequence', '3', hdr.sequence, ''],
+                ['Interface', '4', hdr.interfaceId, 
+                 INTERFACES[hdr.interfaceId] || 'نامشخص'],
+                ['Zone', '5', hdr.zone, ''],
+                ['Device ID', '6', hdr.deviceId, ''],
+                ['Reserved', '7', hdr.reserved, 
+                 hdr.reserved === 0 ? '✅' : '⚠️ باید ۰ باشد'],
+                ['Request Number', '8-9', hdr.requestNumber, ''],
+                ['QoS', '10', hdr.qos, ''],
+                ['Options', '11', hdr.options, ''],
+                ['Flags', '12', `0x${hdr.flags.toString(16).padStart(2, '0')}`, 
+                 getFlagsDesc(hdr.flags)],
+                ['Security', '13', `0x${hdr.security.toString(16).padStart(2, '0')}`, 
+                 getSecurityDesc(hdr.security)],
+                ['Compression', '14', hdr.compression, 
+                 hdr.compression === 0 ? 'بدون فشرده‌سازی' : ''],
+                ['Command', '15', hdr.command, 
+                 COMMANDS[hdr.command] || 'نامشخص']
+            ];
+            
+            const tbody = document.getElementById('headerBody');
+            tbody.innerHTML = rows.map(([field, offset, value, desc]) => 
+                `<tr>
+                    <td><strong>${field}</strong></td>
+                    <td class="value">${offset}</td>
+                    <td class="value">${value}</td>
+                    <td>${desc}</td>
+                </tr>`
+            ).join('');
+        }
+
+        // ============================================================
+        // Render Payload
+        // ============================================================
+        function renderPayload(hdr, payload) {
+            const container = document.getElementById('payloadContent');
+            
+            if (payload.length === 0) {
+                container.innerHTML = '<p class="status-warn">⚠️ Payload خالی است</p>';
+                return;
+            }
+            
+            let html = `
+                <table>
+                    <tr>
+                        <th>طول</th>
+                        <td class="value">${payload.length} bytes</td>
+                    </tr>
+                    <tr>
+                        <th>Hex</th>
+                        <td class="value">${Array.from(payload).map(b => b.toString(16).padStart(2, '0')).join(' ')}</td>
+                    </tr>
+                </table>
+            `;
+            
+            // اگر Registry باشد
+            if (hdr.command === 2 || hdr.command === 3) {
+                if (payload.length >= 2) {
+                    const regAddr = payload[0] | (payload[1] << 8);
+                    html += `
+                        <div class="info-box">
+                            <strong>📝 Registry:</strong><br>
+                            Address: <span class="value">0x${regAddr.toString(16).padStart(4, '0')}</span><br>
+                    `;
+                    
+                    if (payload.length > 2) {
+                        const value = payload.slice(2);
+                        html += `
+                            Value (${value.length} bytes): 
+                            <span class="value">${Array.from(value).map(b => b.toString(16).padStart(2, '0')).join(' ')}</span><br>
+                            Value (decoded): <span class="value">${Array.from(value).join(', ')}</span>
+                        `;
+                    }
+                    
+                    html += '</div>';
+                }
+            }
+            
+            container.innerHTML = html;
+        }
+
+        // ============================================================
+        // Render CRC
+        // ============================================================
+        function renderCRC(received, calculated, bytes) {
+            const match = received === calculated;
+            const container = document.getElementById('crcContent');
+            
+            container.innerHTML = `
+                <table>
+                    <tr>
+                        <th>CRC دریافتی</th>
+                        <td class="value">0x${received.toString(16).padStart(8, '0').toUpperCase()}</td>
+                    </tr>
+                    <tr>
+                        <th>CRC محاسبه‌شده</th>
+                        <td class="value">0x${calculated.toString(16).padStart(8, '0').toUpperCase()}</td>
+                    </tr>
+                    <tr>
+                        <th>وضعیت</th>
+                        <td class="${match ? 'status-pass' : 'status-fail'}">
+                            ${match ? '✅ مطابقت دارد' : '❌ مطابقت ندارد'}
+                        </td>
+                    </tr>
+                </table>
+                ${!match ? `
+                    <div class="error-box">
+                        <strong>⚠️ هشدار:</strong> CRC مطابقت ندارد. فریم ممکن است:
+                        <ul style="margin-top: 5px; margin-right: 20px;">
+                            <li>خراب شده باشد</li>
+                            <li>رمزنگاری‌شده باشد</li>
+                            <li>ناقص باشد</li>
+                        </ul>
+                    </div>
+                ` : ''}
+            `;
+        }
+
+        // ============================================================
+        // Render Hex Dump
+        // ============================================================
+        function renderHexDump(bytes) {
+            const container = document.getElementById('hexDump');
+            let html = '';
+            
+            for (let i = 0; i < bytes.length; i += 16) {
+                const chunk = bytes.slice(i, i + 16);
+                const offset = i.toString(16).padStart(4, '0');
+                
+                let hexPart = '';
+                for (let j = 0; j < 16; j++) {
+                    if (j < chunk.length) {
+                        hexPart += chunk[j].toString(16).padStart(2, '0');
+                    } else {
+                        hexPart += '  ';
+                    }
+                    if (j === 7) hexPart += ' ';
+                    hexPart += ' ';
+                }
+                
+                let asciiPart = '';
+                for (let j = 0; j < chunk.length; j++) {
+                    const b = chunk[j];
+                    asciiPart += (b >= 32 && b <= 126) ? String.fromCharCode(b) : '.';
+                }
+                
+                html += `<span class="offset">${offset}</span>  ${hexPart} <span class="ascii">|${asciiPart}|</span>\n`;
+            }
+            
+            container.innerHTML = html;
+        }
+
+        // ============================================================
+        // Render Analysis
+        // ============================================================
+        function renderAnalysis(hdr, payload, bytes, crcReceived, crcCalculated) {
+            const container = document.getElementById('analysisContent');
+            const issues = [];
+            const successes = [];
+            
+            // Check protocol
+            if (hdr.protocolVersion === 2) {
+                successes.push('پروتکل mYBUS v2 صحیح');
+            } else {
+                issues.push(`پروتکل باید 2 باشد، اما ${hdr.protocolVersion} است`);
+            }
+            
+            // Check length
+            if (hdr.length === bytes.length) {
+                successes.push('طول فریم صحیح');
+            } else {
+                issues.push(`طول اعلام‌شده (${hdr.length}) با طول واقعی (${bytes.length}) مطابقت ندارد`);
+            }
+            
+            // Check reserved
+            if (hdr.reserved === 0) {
+                successes.push('Reserved صحیح (0)');
+            } else {
+                issues.push(`Reserved باید 0 باشد، اما ${hdr.reserved} است`);
+            }
+            
+            // Check CRC
+            if (crcReceived === crcCalculated) {
+                successes.push('CRC32 صحیح');
+            } else {
+                issues.push('CRC32 مطابقت ندارد');
+            }
+            
+            // Check command
+            if (hdr.command === 2 || hdr.command === 3) {
+                successes.push(`دستور Registry: ${COMMANDS[hdr.command]}`);
+            } else if (hdr.command === 0) {
+                issues.push('Command نامعتبر (0)');
+            }
+            
+            // Render
+            let html = '';
+            
+            if (successes.length > 0) {
+                html += '<div class="info-box"><strong>✅ موفق:</strong><ul style="margin-right: 20px; margin-top: 5px;">';
+                successes.forEach(s => html += `<li>${s}</li>`);
+                html += '</ul></div>';
+            }
+            
+            if (issues.length > 0) {
+                html += '<div class="error-box"><strong>❌ مشکلات:</strong><ul style="margin-right: 20px; margin-top: 5px;">';
+                issues.forEach(i => html += `<li>${i}</li>`);
+                html += '</ul></div>';
+            }
+            
+            // اگر فریم مشکوک است
+            if (issues.length > 0) {
+                html += `
+                    <div class="info-box" style="margin-top: 15px;">
+                        <strong>💡 پیشنهاد:</strong><br>
+                        اگر فریم رمزنگاری‌شده است، ابتدا آن را با AES-256-GCM دیکریپت کنید
+                        و سپس با این ابزار دیکد نمایید.
+                    </div>
+                `;
+            }
+            
+            container.innerHTML = html;
+        }
+
+        // ============================================================
+        // Helpers
+        // ============================================================
+        function getFlagsDesc(flags) {
+            const parts = [];
+            if (flags & 0x01) parts.push('RSP (پاسخ)');
+            else parts.push('Request');
+            if (flags & 0x04) parts.push('S/F (خطا)');
+            if (flags & 0x20) parts.push('SCU');
+            return parts.join(' | ');
+        }
+
+        function getSecurityDesc(sec) {
+            if (sec === 0) return 'بدون امنیت';
+            if (sec === 0x20) return 'AES-256-GCM';
+            return `0x${sec.toString(16)}`;
+        }
+
+        // ============================================================
+        // UI Actions
+        // ============================================================
+        function pasteFromClipboard() {
+            navigator.clipboard.readText().then(text => {
+                document.getElementById('frameInput').value = text.trim();
+            }).catch(err => {
+                alert('❌ دسترسی به کلیپ‌بورد ممکن نیست');
+            });
+        }
+
+        function clearInput() {
+            document.getElementById('frameInput').value = '';
+            ['headerCard', 'payloadCard', 'crcCard', 'hexCard', 'analysisCard'].forEach(id => {
+                document.getElementById(id).style.display = 'none';
+            });
+        }
+
+        function loadExample() {
+            const examples = [
+                '021600000101010001000000200200020507c776af7b',
+                '02140000010101000100000000000002028101',
+                '0218000001010100010000000000000203810301'
+            ];
+            const idx = Math.floor(Math.random() * examples.length);
+            document.getElementById('frameInput').value = examples[idx];
+        }
+
+        // ============================================================
+        // Keyboard shortcut
+        // ============================================================
+        document.getElementById('frameInput').addEventListener('keypress', (e) => {
+            if (e.key === 'Enter') decodeFrame();
+        });
+    </script>
+</body>
+</html>

@@ -18,10 +18,6 @@ public:
     CloudManager();
     ~CloudManager();
 
-    // ========================================================
-    // Auth
-    // ========================================================
-
     bool loginUser(
         const String& u,
         const String& p,
@@ -36,10 +32,6 @@ public:
         const String& u,
         const String& p
     );
-
-    // ========================================================
-    // mYBUS
-    // ========================================================
 
     bool performHandshake();
 
@@ -58,10 +50,6 @@ public:
         uint8_t busDeviceId = 0,
         JsonDocument* outResponse = nullptr
     );
-
-    // ========================================================
-    // mYBUS Address Configuration
-    // ========================================================
 
     void setMybusDeviceId(
         uint8_t deviceId
@@ -129,7 +117,7 @@ private:
     // ========================================================
 
     String apiBaseUrl_ =
-        "http://192.168.88.198:3000";
+        "http://192.168.88.184:3000";
 
     // JWT / backend identity
     String deviceId_;

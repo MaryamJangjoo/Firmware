@@ -103,10 +103,6 @@ CloudWebSocketServer::~CloudWebSocketServer()
     connected_ = false;
 }
 
-// ============================================================
-// Request number
-// ============================================================
-
 uint32_t CloudWebSocketServer::nextRequestNumber()
 {
     ++requestNumber_;
@@ -117,10 +113,6 @@ uint32_t CloudWebSocketServer::nextRequestNumber()
 
     return requestNumber_;
 }
-
-// ============================================================
-// Start
-// ============================================================
 
 void CloudWebSocketServer::start()
 {
@@ -197,10 +189,6 @@ void CloudWebSocketServer::start()
     Serial.println("[WS] HTTP: GET /info (binary frame)");
 }
 
-// ============================================================
-// Loop
-// ============================================================
-
 void CloudWebSocketServer::loop()
 {
     if (ws_ != nullptr) {
@@ -208,18 +196,10 @@ void CloudWebSocketServer::loop()
     }
 }
 
-// ============================================================
-// Connection
-// ============================================================
-
 bool CloudWebSocketServer::isConnected() const
 {
     return connected_ && client_ != nullptr;
 }
-
-// ============================================================
-// Send realtime data
-// ============================================================
 
 bool CloudWebSocketServer::sendRealtimeData(
     JsonDocument& data
@@ -253,10 +233,6 @@ bool CloudWebSocketServer::sendRealtimeData(
     return true;
 }
 
-// ============================================================
-// Request Site Info
-// ============================================================
-
 void CloudWebSocketServer::requestSiteInfo()
 {
     if (!isConnected()) {
@@ -275,10 +251,6 @@ void CloudWebSocketServer::requestSiteInfo()
 
     sendRealtimeData(request);
 }
-
-// ============================================================
-// Request Users
-// ============================================================
 
 void CloudWebSocketServer::requestUsersList()
 {
@@ -299,10 +271,6 @@ void CloudWebSocketServer::requestUsersList()
     sendRealtimeData(request);
 }
 
-// ============================================================
-// WebSocket Event
-// ============================================================
-
 void CloudWebSocketServer::onEvent(
     AsyncWebSocket* server,
     AsyncWebSocketClient* client,
@@ -313,10 +281,6 @@ void CloudWebSocketServer::onEvent(
 )
 {
     switch (type) {
-
-        // --------------------------------------------------------
-        // CONNECT
-        // --------------------------------------------------------
 
         case WS_EVT_CONNECT: {
 
@@ -345,10 +309,6 @@ void CloudWebSocketServer::onEvent(
             break;
         }
 
-        // --------------------------------------------------------
-        // DISCONNECT
-        // --------------------------------------------------------
-
         case WS_EVT_DISCONNECT: {
 
             Serial.printf(
@@ -365,10 +325,6 @@ void CloudWebSocketServer::onEvent(
             break;
         }
 
-        // --------------------------------------------------------
-        // DATA
-        // --------------------------------------------------------
-
         case WS_EVT_DATA: {
 
             handleMessage(
@@ -380,20 +336,12 @@ void CloudWebSocketServer::onEvent(
             break;
         }
 
-        // --------------------------------------------------------
-        // Other events
-        // --------------------------------------------------------
-
         case WS_EVT_PONG:
         case WS_EVT_ERROR:
         default:
             break;
     }
 }
-
-// ============================================================
-// Handle Message
-// ============================================================
 
 void CloudWebSocketServer::handleMessage(
     void* arg,
@@ -408,7 +356,6 @@ void CloudWebSocketServer::handleMessage(
         return;
     }
 
-    // Only handle complete TEXT frames.
     if (!info->final ||
         info->index != 0 ||
         info->len != len ||

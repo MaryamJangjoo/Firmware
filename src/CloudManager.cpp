@@ -81,19 +81,7 @@ CloudManager::CloudManager()
         deviceId_ = storedDeviceId;
     }
 
-    mybusSession_.setDeviceId(deviceId_); // ✅ sync اول
-
-    // --------------------------------------------------------
-    // mYBUS numeric address
-    //
-    // IMPORTANT:
-    // These values must match:
-    //
-    // device.mybusDeviceId
-    // device.mybusZoneId
-    //
-    // on backend.
-    // --------------------------------------------------------
+    mybusSession_.setDeviceId(deviceId_); 
 
     mybusDeviceId_ =
         preferences_.getUChar(
@@ -107,9 +95,6 @@ CloudManager::CloudManager()
             0
         );
 
-    // --------------------------------------------------------
-    // Configure session
-    // --------------------------------------------------------
 
     mybusSession_.setInterfaceId(
         mybus_proto::INTERFACE_WIFI
@@ -119,35 +104,17 @@ CloudManager::CloudManager()
         mybusZoneId_
     );
 
-    // --------------------------------------------------------
-    // JWT
-    //
-    // ⚠️ CloudAuth::loadToken() می‌تواند deviceId_ را (چون رفرنس است)
-    // از preferences دوباره بازنویسی کند. برای اطمینان، بعد از این
-    // فراخوانی هم mybusSession_ را دوباره sync می‌کنیم.
-    // --------------------------------------------------------
 
     jwtToken_ =
         auth_.loadToken();
 
-    mybusSession_.setDeviceId(deviceId_); // ✅ sync دوباره بعد از loadToken
-
-    // --------------------------------------------------------
-    // Device ECDH keypair
-    // --------------------------------------------------------
+    mybusSession_.setDeviceId(deviceId_); 
 
     if (!mybusSession_.initializeDeviceKeypair()) {
         Serial.println(
             "[CLOUD] ❌ Device keypair initialization failed"
         );
     }
-
-    // --------------------------------------------------------
-    // Filesystem / Users
-    //
-    // ✅ site_info.json دیگر لازم نیست: فقط users.json (برای لاگین
-    // آفلاین) ساخته/خوانده می‌شود.
-    // --------------------------------------------------------
 
     if (!storage_.init()) {
 
@@ -160,9 +127,6 @@ CloudManager::CloudManager()
         storage_.createDefaultUsersFile();
     }
 
-    // --------------------------------------------------------
-    // Startup log
-    // --------------------------------------------------------
 
     Serial.println();
     Serial.println(
@@ -250,18 +214,12 @@ CloudManager::CloudManager()
     }
 }
 
-// ============================================================
-// Destructor
-// ============================================================
 
 CloudManager::~CloudManager()
 {
     preferences_.end();
 }
 
-// ============================================================
-// Auth
-// ============================================================
 
 bool CloudManager::loginUser(
     const String& u,
@@ -275,10 +233,6 @@ bool CloudManager::loginUser(
             deviceId
         );
 
-    // ✅ لاگین می‌تواند deviceId_ را از پاسخ بک‌اند (responseDeviceId)
-    // تغییر دهد؛ چون CloudAuth::deviceId_ رفرنس است، خود
-    // CloudManager::deviceId_ هم عوض می‌شود. باید mybusSession_ را
-    // دوباره sync کنیم تا هندشیک بعدی از deviceId درست استفاده کند.
     if (ok) {
         mybusSession_.setDeviceId(deviceId_);
     }
@@ -296,9 +250,6 @@ bool CloudManager::isLoggedIn() const
     return auth_.isLoggedIn();
 }
 
-// ============================================================
-// Offline login
-// ============================================================
 
 bool CloudManager::loginOffline(
     const String& username,
@@ -316,15 +267,10 @@ bool CloudManager::loginOffline(
     );
 }
 
-// ============================================================
-// mYBUS
-// ============================================================
 
 bool CloudManager::performHandshake()
 {
-    // --------------------------------------------------------
-    // Handshake requires a valid configured address
-    // --------------------------------------------------------
+
 
     if (mybusDeviceId_ == 0 ||
         mybusDeviceId_ == 255) {
@@ -346,14 +292,10 @@ bool CloudManager::performHandshake()
         return false;
     }
 
-    // ✅ sync نهایی، درست قبل از هندشیک، به‌عنوان شبکه‌ی ایمنی آخر
-    // (ارزان است و تضمین می‌کند مقدار همیشه به‌روز باشد، حتی اگر
-    // مسیر دیگری deviceId_ را تغییر داده باشد).
     mybusSession_.setDeviceId(
         deviceId_
     );
 
-    // Keep session configuration synchronized
     mybusSession_.setInterfaceId(
         mybus_proto::INTERFACE_WIFI
     );
@@ -473,9 +415,6 @@ bool CloudManager::sendRegistryFrame(
     );
 }
 
-// ============================================================
-// mYBUS address configuration
-// ============================================================
 
 void CloudManager::setMybusDeviceId(
     uint8_t deviceId)
@@ -547,10 +486,6 @@ uint8_t CloudManager::getMybusZoneId() const
     return mybusZoneId_;
 }
 
-// ============================================================
-// WebSocket
-// ============================================================
-
 void CloudManager::startWebSocketServer()
 {
     wsServer_.start();
@@ -571,9 +506,6 @@ bool CloudManager::sendRealtimeData(
 {
     return wsServer_.sendRealtimeData(data);
 }
-// ============================================================
-// WebSocket callbacks
-// ============================================================
 
 void CloudManager::onCommand(
     CloudWebSocketServer::CommandCallback cb
@@ -595,10 +527,6 @@ void CloudManager::onShouldSkipMybusWrite(
 {
     wsServer_.onShouldSkipMybusWrite(cb);
 }
-
-// ============================================================
-// Config
-// ============================================================
 
 void CloudManager::setApiBaseUrl(
     const String& url)
