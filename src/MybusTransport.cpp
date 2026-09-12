@@ -1149,3 +1149,159 @@ bool MybusTransport::sendMybusData(
         outResponse
     );
 }
+// ============================================================
+// این دو تابع را به انتهای src/MybusTransport.cpp اضافه کن.
+// (mybus_frame.h و crypto.hpp قبلاً بالای همان فایل include شده‌اند)
+// ============================================================
+
+bool MybusTransport::buildControlFrame(
+    uint8_t command,
+    uint8_t flags,
+    uint16_t requestNumber,
+    const uint8_t* payload,
+    size_t payloadLen,
+    std::vector<uint8_t>& outWire)
+{
+    outWire.clear();
+
+    if (payloadLen > MYBUS_MAX_PAYLOAD_SIZE) {
+        Serial.printf(
+            "[mYBUS-WS] ❌ Payload too large: %u\n",
+            static_cast<unsigned>(payloadLen)
+        );
+        return false;
+    }
+
+    if (!session_.isEstablished()) {
+        Serial.println(
+            "[mYBUS-WS] ❌ No secure session"
+        );
+        return false;
+    }
+
+    flags |= (1U << MYBUS_FLAG_SCU_BIT);
+
+    MyBusHeader hdr;
+    hdr.protocolVersion = MYBUS_PROTOCOL_VERSION;
+    hdr.length          = 0;
+    hdr.sequence        = 0;
+    hdr.interfaceId     = session_.interfaceId();
+    hdr.zone            = session_.zone();
+    hdr.deviceId        = 0; // کانال کنترل محلی - آدرس یک دستگاه روی باس نیست
+    hdr.reserved        = 0;
+    hdr.requestNumber   = requestNumber;
+    hdr.qos             = mybus_proto::QOS_DEFAULT;
+    hdr.options         = mybus_proto::OPTIONS_DEFAULT;
+    hdr.flags           = flags;
+    hdr.security        = mybus_proto::SECURITY_ENCRYPTED;
+    hdr.compression     = mybus_proto::COMPRESSION_NONE;
+    hdr.command         = command;
+
+    const size_t maxFrameSize =
+        MYBUS_HEADER_SIZE + MYBUS_MAX_PAYLOAD_SIZE + MYBUS_CRC_SIZE;
+
+    std::vector<uint8_t> plainFrame(maxFrameSize);
+    std::vector<uint8_t> ciphertext(maxFrameSize);
+
+    const size_t plainLen = mybus_buildFrame(
+        hdr, payload, payloadLen, plainFrame.data(), plainFrame.size());
+
+    if (plainLen == 0) {
+        Serial.println("[mYBUS-WS] ❌ Frame build failed");
+        return false;
+    }
+
+    uint8_t iv[MYBUS_AES_IV_SIZE] = {0};
+    uint8_t tag[MYBUS_AES_TAG_SIZE] = {0};
+
+    if (!mybus_encryptFrame(
+            plainFrame.data(), plainLen,
+            session_.sessionKey(),
+            ciphertext.data(), iv, tag)) {
+        Serial.println("[mYBUS-WS] ❌ Encryption failed");
+        return false;
+    }
+
+    const size_t wireCapacity =
+        MYBUS_AES_IV_SIZE + plainLen + MYBUS_AES_TAG_SIZE;
+
+    outWire.resize(wireCapacity);
+
+    const size_t wireLen = mybus_packWireMessage(
+        iv, tag, ciphertext.data(), plainLen,
+        outWire.data(), outWire.size());
+
+    if (wireLen == 0) {
+        Serial.println("[mYBUS-WS] ❌ Wire packing failed");
+        outWire.clear();
+        return false;
+    }
+
+    outWire.resize(wireLen);
+    return true;
+}
+
+bool MybusTransport::parseControlFrame(
+    const uint8_t* wireData,
+    size_t wireLen,
+    const uint8_t* allowedCommands,
+    size_t allowedCommandsCount,
+    MyBusHeader& outHdr,
+    std::vector<uint8_t>& outPayload,
+    MyBusFrameError& outError)
+{
+    outPayload.clear();
+    outError = MyBusFrameError::NONE;
+
+    if (!session_.isEstablished()) {
+        Serial.println("[mYBUS-WS] ❌ No secure session");
+        return false;
+    }
+
+    const size_t minimumWireLen =
+        MYBUS_AES_IV_SIZE + MYBUS_MIN_FRAME_SIZE + MYBUS_AES_TAG_SIZE;
+
+    if (wireData == nullptr || wireLen < minimumWireLen) {
+        Serial.printf(
+            "[mYBUS-WS] ❌ Frame too short: %u\n",
+            static_cast<unsigned>(wireLen)
+        );
+        return false;
+    }
+
+    const uint8_t* iv = wireData;
+    const uint8_t* cipher = wireData + MYBUS_AES_IV_SIZE;
+    const size_t cipherLen = wireLen - MYBUS_AES_IV_SIZE - MYBUS_AES_TAG_SIZE;
+    const uint8_t* tag = wireData + MYBUS_AES_IV_SIZE + cipherLen;
+
+    std::vector<uint8_t> plainFrame(cipherLen);
+
+    if (!mybus_decryptFrame(
+            cipher, cipherLen,
+            session_.sessionKey(),
+            iv, tag, plainFrame.data())) {
+        Serial.println("[mYBUS-WS] ❌ GCM authentication failed");
+        return false;
+    }
+
+    const uint8_t* payload = nullptr;
+    size_t payloadLen = 0;
+
+    if (!mybus_validateFrame(
+            plainFrame.data(), plainFrame.size(),
+            session_.interfaceId(), static_cast<int>(session_.zone()),
+            allowedCommands, allowedCommandsCount,
+            outHdr, &payload, &payloadLen, outError)) {
+        Serial.printf(
+            "[mYBUS-WS] ❌ Frame invalid: %s\n",
+            mybus_frameErrorToString(outError)
+        );
+        return false;
+    }
+
+    if (payloadLen > 0 && payload != nullptr) {
+        outPayload.assign(payload, payload + payloadLen);
+    }
+
+    return true;
+}

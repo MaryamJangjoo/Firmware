@@ -501,17 +501,10 @@ bool CloudManager::isWebSocketConnected() const
     return wsServer_.isConnected();
 }
 
-bool CloudManager::sendRealtimeData(
-    JsonDocument& data)
-{
-    return wsServer_.sendRealtimeData(data);
-}
 
-void CloudManager::onCommand(
-    CloudWebSocketServer::CommandCallback cb
-)
+void CloudManager::onBinaryFrame(CloudWebSocketServer::BinaryFrameCallback cb)
 {
-    wsServer_.onCommand(cb);
+    wsServer_.onBinaryFrame(cb);
 }
 
 void CloudManager::onLocalRegistryRead(

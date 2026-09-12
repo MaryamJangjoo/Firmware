@@ -3,9 +3,17 @@
 
 #include <Arduino.h>
 #include <ArduinoJson.h>
+#include <vector>
 
 #include "HttpTransport.h"
 #include "MybusSession.h"
+
+// ⚠️ عمداً mybus_frame.h اینجا include نمی‌شود: آن فایل ماکروی
+// MYBUS_MAX_PAYLOAD_SIZE (=128) را تعریف می‌کند که با نام عضو کلاس
+// پایین (constexpr size_t MYBUS_MAX_PAYLOAD_SIZE = 512;) تداخل متنی
+// پیدا می‌کند. به‌جایش فقط forward-declare می‌کنیم.
+struct MyBusHeader;
+enum class MyBusFrameError : uint8_t;
 
 class MybusTransport {
 public:
@@ -45,6 +53,37 @@ public:
         JsonDocument& data,
         uint32_t requestNumber,
         JsonDocument* outResponse = nullptr
+    );
+
+    // ========================================================
+    // Generic control-frame helpers - بدون هیچ I/O روی HTTP.
+    //
+    // این‌ها توسط CloudWebSocketServer استفاده می‌شوند تا همان فرمت
+    // سیمی رمزنگاری‌شده‌ی mYBUS v2 ([IV][CIPHERTEXT][TAG]) را مستقیماً
+    // روی کانال محلی WebSocket پیاده کنند (به‌جای رفتن از مسیر
+    // HttpTransport::sendRawBinaryToBackend).
+    //
+    // هر دو نیاز دارند session_.isEstablished() true باشد (یعنی
+    // هندشیک ECDH با بک‌اند روی HTTP قبلاً کامل شده باشد).
+    // ========================================================
+
+    bool buildControlFrame(
+        uint8_t command,
+        uint8_t flags,
+        uint16_t requestNumber,
+        const uint8_t* payload,
+        size_t payloadLen,
+        std::vector<uint8_t>& outWire
+    );
+
+    bool parseControlFrame(
+        const uint8_t* wireData,
+        size_t wireLen,
+        const uint8_t* allowedCommands,
+        size_t allowedCommandsCount,
+        MyBusHeader& outHdr,
+        std::vector<uint8_t>& outPayload,
+        MyBusFrameError& outError
     );
 
 private:

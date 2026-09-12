@@ -7,10 +7,11 @@
 #include <btAudio.h>
 #include <FastLED.h>
 #include <ArduinoJson.h>
+#include <vector>
 
 #include "CloudManager.h"
 #include "ecosmart_registeries.h"
-
+#include "mybus_frame.h"
 
 struct RawRegisterValue {
     Reg_DataType_t datatype = reg_datatype_uint8;
@@ -48,7 +49,7 @@ private:
     static constexpr int PIN_I2S_PDN   = 27;
 
     const char* WIFI_SSID     = "megafaYakand8202";
-    const char* WIFI_PASSWORD = "megafaY@kand*@)@";
+    const char* WIFI_PASSWORD = "megafaYak@kand*@)@";
 
     static constexpr uint8_t MYBUS_DEVICE_ID = 1;
     static constexpr uint8_t MYBUS_ZONE_ID   = 1;
@@ -79,7 +80,6 @@ private:
     void initAudioHardware();
     void configureMybusAddress();
 
-
     void handleWiFiReconnect();
     void handleLedState();
 
@@ -95,7 +95,6 @@ private:
     bool readAudioRegistry(uint16_t regAddr, RawRegisterValue& outValue);
     bool writeAudioRegistry(uint16_t regAddr, const String& regVal);
 
-
     bool handleCurtainRegistryWrite(uint16_t regAddr, const String& regVal);
 
     String getRegistryValue(uint16_t regAddr);
@@ -103,7 +102,16 @@ private:
     bool writeLocalRegistry(uint16_t regAddr, const String& regVal);
     void applyOutputsToHardware();
 
-    void onCommandReceived(const JsonDocument& command);
+    void onBinaryFrameReceived(
+        const MyBusHeader& hdr,
+        const std::vector<uint8_t>& payload
+    );
+
+    static String rawPayloadToRegValString(
+        uint16_t regAddr,
+        const uint8_t* data,
+        size_t len
+    );
 
     static AppController* s_instance;
 };

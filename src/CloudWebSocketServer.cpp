@@ -6,69 +6,70 @@
 #include <vector>
 
 #include "mybus_frame.h"
+#include "mybus_registry.h"
 #include "mybus_protocol_constants.h"
-#include "mybus_value_codec.h"  
+#include "mybus_value_codec.h"
 #include "CloudStorage.h"
-#include "RegisterRawValue.h"   
+#include "RegisterRawValue.h"
 
 namespace {
 
-void assignRegisterRawValueToJson(JsonDocument& doc, const char* key, const RegisterRawValue& rv)
-{
-    if (rv.isString()) {
-        doc[key] = rv.stringValue;
-        return;
+// ------------------------------------------------------------
+// ByteWriter: TLV باینری ساده، فقط برای payloadهای WS-only
+// (STATUS/USERS_LIST/SITE_INFO/WELCOME).
+// ------------------------------------------------------------
+class ByteWriter {
+public:
+    explicit ByteWriter(std::vector<uint8_t>& buf) : buf_(buf) {}
+
+    void u8(uint8_t v) { buf_.push_back(v); }
+
+    void i8(int8_t v) { buf_.push_back(static_cast<uint8_t>(v)); }
+
+    void u16(uint16_t v) {
+        buf_.push_back(static_cast<uint8_t>(v & 0xFF));
+        buf_.push_back(static_cast<uint8_t>((v >> 8) & 0xFF));
     }
 
-    switch (rv.type) {
-        case RegRawType::BIT:
-            doc[key] = (rv.bytes[0] != 0);
-            break;
-        case RegRawType::UINT8:
-            doc[key] = rv.bytes[0];
-            break;
-        case RegRawType::UINT16: {
-            uint16_t v;
-            memcpy(&v, rv.bytes, sizeof(v));
-            doc[key] = v;
-            break;
+    void u32(uint32_t v) {
+        buf_.push_back(static_cast<uint8_t>(v & 0xFF));
+        buf_.push_back(static_cast<uint8_t>((v >> 8) & 0xFF));
+        buf_.push_back(static_cast<uint8_t>((v >> 16) & 0xFF));
+        buf_.push_back(static_cast<uint8_t>((v >> 24) & 0xFF));
+    }
+
+    void str8(const String& s) {
+        size_t len = s.length();
+        if (len > 255) len = 255;
+        buf_.push_back(static_cast<uint8_t>(len));
+        for (size_t i = 0; i < len; ++i) {
+            buf_.push_back(static_cast<uint8_t>(s[i]));
         }
-        case RegRawType::UINT32: {
-            uint32_t v;
-            memcpy(&v, rv.bytes, sizeof(v));
-            doc[key] = v;
-            break;
-        }
-        case RegRawType::INT8: {
-            int8_t v;
-            memcpy(&v, rv.bytes, sizeof(v));
-            doc[key] = v;
-            break;
-        }
-        case RegRawType::INT16: {
-            int16_t v;
-            memcpy(&v, rv.bytes, sizeof(v));
-            doc[key] = v;
-            break;
-        }
-        case RegRawType::INT32: {
-            int32_t v;
-            memcpy(&v, rv.bytes, sizeof(v));
-            doc[key] = v;
-            break;
-        }
-        case RegRawType::FLOAT: {
-            float v;
-            memcpy(&v, rv.bytes, sizeof(v));
-            doc[key] = v;
-            break;
-        }
-        default:
-            break;
+    }
+
+private:
+    std::vector<uint8_t>& buf_;
+};
+
+uint8_t hexNibble(char c) {
+    if (c >= '0' && c <= '9') return static_cast<uint8_t>(c - '0');
+    if (c >= 'a' && c <= 'f') return static_cast<uint8_t>(c - 'a' + 10);
+    if (c >= 'A' && c <= 'F') return static_cast<uint8_t>(c - 'A' + 10);
+    return 0;
+}
+
+void hexStringToBytes(const String& hex, std::vector<uint8_t>& out) {
+    out.clear();
+    const size_t n = hex.length() / 2;
+    out.reserve(n);
+    for (size_t i = 0; i < n; ++i) {
+        out.push_back(static_cast<uint8_t>(
+            (hexNibble(hex[i * 2]) << 4) | hexNibble(hex[i * 2 + 1])));
     }
 }
 
-} 
+} // namespace
+
 
 CloudWebSocketServer::CloudWebSocketServer(
     MybusTransport& mybus,
@@ -83,22 +84,17 @@ CloudWebSocketServer::CloudWebSocketServer(
 {
 }
 
-
-
 CloudWebSocketServer::~CloudWebSocketServer()
 {
     if (ws_ != nullptr) {
         ws_->closeAll();
-
         delete ws_;
         ws_ = nullptr;
     }
-
     if (server_ != nullptr) {
         delete server_;
         server_ = nullptr;
     }
-
     client_ = nullptr;
     connected_ = false;
 }
@@ -106,22 +102,16 @@ CloudWebSocketServer::~CloudWebSocketServer()
 uint32_t CloudWebSocketServer::nextRequestNumber()
 {
     ++requestNumber_;
-
-    if (requestNumber_ == 0) {
-        requestNumber_ = 1;
-    }
-
+    if (requestNumber_ == 0) requestNumber_ = 1;
     return requestNumber_;
 }
 
+
 void CloudWebSocketServer::start()
 {
-    if (server_ != nullptr) {
-        return;
-    }
+    if (server_ != nullptr) return;
 
     server_ = new AsyncWebServer(80);
-
     ws_ = new AsyncWebSocket("/ws");
 
     ws_->onEvent(
@@ -133,23 +123,17 @@ void CloudWebSocketServer::start()
             uint8_t* data,
             size_t len
         ) {
-            this->onEvent(
-                server,
-                client,
-                type,
-                arg,
-                data,
-                len
-            );
+            this->onEvent(server, client, type, arg, data, len);
         }
     );
 
     server_->addHandler(ws_);
 
-    static constexpr const char* FIRMWARE_VERSION = "2.0.0";       
-    static constexpr const char* PART_NUMBER      = "SEC-BLB56001"; 
-    server_->on("/info", HTTP_GET, [this](AsyncWebServerRequest *request) {
+    static constexpr const char* FIRMWARE_VERSION = "2.0.0";
+    static constexpr const char* PART_NUMBER      = "SEC-BLB56001";
 
+    // فقط endpoint دیباگ JSON-over-HTTP باقی می‌ماند
+    server_->on("/info", HTTP_GET, [this](AsyncWebServerRequest *request) {
         AsyncResponseStream *response =
             request->beginResponseStream("application/json");
 
@@ -159,7 +143,6 @@ void CloudWebSocketServer::start()
         root["deviceId"]        = deviceId_;
         root["cloudConnected"]  = connected_;
 
-        
         char serialHex[9];
         snprintf(serialHex, sizeof(serialHex), "%08X",
                   static_cast<uint32_t>(ESP.getEfuseMac() & 0xFFFFFFFFu));
@@ -167,15 +150,11 @@ void CloudWebSocketServer::start()
 
         root["partNumber"]      = PART_NUMBER;
         root["firmwareVersion"] = FIRMWARE_VERSION;
-
         root["uptime"]   = millis() / 1000;
-
         root["ramTotal"] = ESP.getHeapSize();
         root["ramFree"]  = ESP.getFreeHeap();
-
         root["storageTotal"] = storage_.getStorageTotalBytes();
         root["storageUsed"]  = storage_.getStorageUsedBytes();
-
         root["wifiRSSI"] = WiFi.RSSI();
 
         serializeJson(root, *response);
@@ -185,15 +164,13 @@ void CloudWebSocketServer::start()
     server_->begin();
 
     Serial.println("[WS] WebSocket server started");
-    Serial.println("[WS] Path: /ws");
-    Serial.println("[WS] HTTP: GET /info (binary frame)");
+    Serial.println("[WS] Path: /ws (binary mYBUS control frames only)");
+    Serial.println("[WS] HTTP: GET /info (JSON, debug only)");
 }
 
 void CloudWebSocketServer::loop()
 {
-    if (ws_ != nullptr) {
-        ws_->cleanupClients();
-    }
+    if (ws_ != nullptr) ws_->cleanupClients();
 }
 
 bool CloudWebSocketServer::isConnected() const
@@ -201,75 +178,90 @@ bool CloudWebSocketServer::isConnected() const
     return connected_ && client_ != nullptr;
 }
 
-bool CloudWebSocketServer::sendRealtimeData(
-    JsonDocument& data
-)
+
+bool CloudWebSocketServer::sendControlFrame(
+    uint8_t command,
+    uint8_t flags,
+    uint16_t requestNumber,
+    const uint8_t* payload,
+    size_t payloadLen)
 {
     if (!connected_ || client_ == nullptr) {
-
-        Serial.println(
-            "[WS] Cannot send: not connected"
-        );
-
+        Serial.println("[WS] Cannot send: not connected");
         return false;
     }
 
-    String response;
+    std::vector<uint8_t> wire;
 
-    serializeJson(
-        data,
-        response
-    );
+    if (!mybus_.buildControlFrame(command, flags, requestNumber, payload, payloadLen, wire)) {
+        Serial.println("[WS] ❌ Failed to build control frame");
+        return false;
+    }
 
-    if (!client_->text(response)) {
-
-        Serial.println(
-            "[WS] Failed to send message"
-        );
-
+    if (!client_->binary(wire.data(), wire.size())) {
+        Serial.println("[WS] ❌ Failed to send binary frame");
         return false;
     }
 
     return true;
 }
 
+
+void CloudWebSocketServer::sendError(
+    uint8_t originalCommand,
+    uint16_t requestNumber,
+    uint8_t reason,
+    uint16_t regAddr)
+{
+    std::vector<uint8_t> payload;
+    ByteWriter w(payload);
+    w.u8(originalCommand);
+    w.u8(reason);
+    w.u16(regAddr);
+
+    const uint8_t flags = (1U << MYBUS_FLAG_RSP_BIT) | (1U << MYBUS_FLAG_SF_BIT);
+    sendControlFrame(mybus_proto::COMMAND_WS_ERROR, flags, requestNumber,
+                      payload.data(), payload.size());
+}
+
+
+void CloudWebSocketServer::sendRegistryReadResponse(
+    uint16_t requestNumber,
+    uint16_t regAddr,
+    const uint8_t* value,
+    size_t valueLen)
+{
+    std::vector<uint8_t> respPayload(2 + valueLen);
+    respPayload[0] = static_cast<uint8_t>(regAddr & 0xFF);
+    respPayload[1] = static_cast<uint8_t>((regAddr >> 8) & 0xFF);
+    if (valueLen > 0 && value != nullptr) {
+        memcpy(respPayload.data() + 2, value, valueLen);
+    }
+
+    const uint8_t flags = (1U << MYBUS_FLAG_RSP_BIT);
+    sendControlFrame(mybus_proto::COMMAND_READ_REGISTRY, flags, requestNumber,
+                      respPayload.data(), respPayload.size());
+}
+
+
 void CloudWebSocketServer::requestSiteInfo()
 {
     if (!isConnected()) {
-
-        Serial.println(
-            "[WS] WebSocket not connected"
-        );
-
+        Serial.println("[WS] WebSocket not connected");
         return;
     }
-
-    JsonDocument request;
-
-    request["action"] = "GET_SITE_INFO";
-    request["deviceId"] = deviceId_;
-
-    sendRealtimeData(request);
+    handleGetSiteInfo(static_cast<uint16_t>(nextRequestNumber() & 0xFFFF));
 }
 
 void CloudWebSocketServer::requestUsersList()
 {
     if (!isConnected()) {
-
-        Serial.println(
-            "[WS] WebSocket not connected"
-        );
-
+        Serial.println("[WS] WebSocket not connected");
         return;
     }
-
-    JsonDocument request;
-
-    request["action"] = "GET_USERS";
-    request["deviceId"] = deviceId_;
-
-    sendRealtimeData(request);
+    handleGetUsers(static_cast<uint16_t>(nextRequestNumber() & 0xFFFF));
 }
+
 
 void CloudWebSocketServer::onEvent(
     AsyncWebSocket* server,
@@ -277,62 +269,43 @@ void CloudWebSocketServer::onEvent(
     AwsEventType type,
     void* arg,
     uint8_t* data,
-    size_t len
-)
+    size_t len)
 {
     switch (type) {
 
         case WS_EVT_CONNECT: {
-
-            Serial.printf(
-                "[WS] Client connected: %u\n",
-                client->id()
-            );
+            Serial.printf("[WS] Client connected: %u\n", client->id());
 
             client_ = client;
             connected_ = true;
 
-            JsonDocument welcome;
+            std::vector<uint8_t> payload;
+            ByteWriter w(payload);
+            w.str8(deviceId_);
+            w.u32(millis() / 1000);
+            w.u32(ESP.getFreeHeap());
+            w.i8(static_cast<int8_t>(WiFi.RSSI()));
 
-            welcome["type"] = "connection_ack";
-            welcome["message"] =
-                "Connected to ESP32 device";
-            welcome["deviceId"] = deviceId_;
-            welcome["uptime"] = millis() / 1000;
-            welcome["freeHeap"] = ESP.getFreeHeap();
-            welcome["wifiRSSI"] = WiFi.RSSI();
-
-            sendRealtimeData(welcome);
-
-            requestUsersList();
+            const uint8_t flags = (1U << MYBUS_FLAG_RSP_BIT);
+            sendControlFrame(
+                mybus_proto::COMMAND_WS_WELCOME, flags,
+                static_cast<uint16_t>(nextRequestNumber() & 0xFFFF),
+                payload.data(), payload.size());
 
             break;
         }
 
         case WS_EVT_DISCONNECT: {
-
-            Serial.printf(
-                "[WS] Client disconnected: %u\n",
-                client->id()
-            );
-
+            Serial.printf("[WS] Client disconnected: %u\n", client->id());
             if (client_ == client) {
-
                 client_ = nullptr;
                 connected_ = false;
             }
-
             break;
         }
 
         case WS_EVT_DATA: {
-
-            handleMessage(
-                arg,
-                data,
-                len
-            );
-
+            handleBinaryMessage(arg, data, len);
             break;
         }
 
@@ -343,629 +316,252 @@ void CloudWebSocketServer::onEvent(
     }
 }
 
-void CloudWebSocketServer::handleMessage(
-    void* arg,
-    uint8_t* data,
-    size_t len
-)
+
+void CloudWebSocketServer::handleBinaryMessage(void* arg, uint8_t* data, size_t len)
 {
-    AwsFrameInfo* info =
-        reinterpret_cast<AwsFrameInfo*>(arg);
+    AwsFrameInfo* info = reinterpret_cast<AwsFrameInfo*>(arg);
 
-    if (info == nullptr || data == nullptr) {
+    if (info == nullptr || data == nullptr) return;
+
+    if (!info->final || info->index != 0 || info->len != len || info->opcode != WS_BINARY) {
+        Serial.println("[WS] ⚠️ Ignoring fragmented/non-binary frame");
         return;
     }
 
-    if (!info->final ||
-        info->index != 0 ||
-        info->len != len ||
-        info->opcode != WS_TEXT) {
+    Serial.printf("[WS] 📥 Binary control frame (%u bytes)\n", static_cast<unsigned>(len));
 
+    static constexpr uint8_t kAllowedIncoming[] = {
+        mybus_proto::COMMAND_READ_REGISTRY,
+        mybus_proto::COMMAND_WRITE_REGISTRY,
+        mybus_proto::COMMAND_WS_STATUS,
+        mybus_proto::COMMAND_WS_USERS_LIST,
+        mybus_proto::COMMAND_WS_SITE_INFO,
+    };
+    static constexpr size_t kAllowedIncomingCount =
+        sizeof(kAllowedIncoming) / sizeof(kAllowedIncoming[0]);
+
+    MyBusHeader hdr;
+    std::vector<uint8_t> payload;
+    MyBusFrameError err;
+
+    if (!mybus_.parseControlFrame(data, len, kAllowedIncoming, kAllowedIncomingCount,
+                                   hdr, payload, err)) {
+        Serial.printf("[WS] ❌ Invalid control frame: %s\n", mybus_frameErrorToString(err));
         return;
     }
 
-    String message;
-
-    message.reserve(len + 1);
-
-    for (size_t i = 0; i < len; ++i) {
-        message += static_cast<char>(data[i]);
+    switch (hdr.command) {
+        case mybus_proto::COMMAND_READ_REGISTRY:
+            handleReadRegistry(hdr, payload);
+            break;
+        case mybus_proto::COMMAND_WRITE_REGISTRY:
+            handleWriteRegistryFrame(hdr, payload);
+            break;
+        case mybus_proto::COMMAND_WS_STATUS:
+            handleGetStatus(hdr.requestNumber);
+            break;
+        case mybus_proto::COMMAND_WS_USERS_LIST:
+            handleGetUsers(hdr.requestNumber);
+            break;
+        case mybus_proto::COMMAND_WS_SITE_INFO:
+            handleGetSiteInfo(hdr.requestNumber);
+            break;
+        default:
+            sendError(hdr.command, hdr.requestNumber, mybus_proto::REASON_BAD_REQUEST);
+            break;
     }
-
-    Serial.printf(
-        "[WS] Message received: %s\n",
-        message.c_str()
-    );
-
-    JsonDocument doc;
-
-    if (
-        deserializeJson(doc, message)
-        != DeserializationError::Ok
-    ) {
-
-        Serial.println(
-            "[WS] JSON parse error"
-        );
-
-        return;
-    }
-
-    if (!doc["action"].is<const char*>()) {
-        return;
-    }
-
-    String action =
-        doc["action"].as<String>();
-
-    // ============================================================
-    // GET_STATUS
-    // ============================================================
-
-    if (action == "GET_STATUS") {
-
-        JsonDocument response;
-
-        response["type"] = "status";
-        response["deviceId"] = deviceId_;
-        response["status"] = "online";
-        response["siteId"] = siteId_;
-        response["uptime"] = millis() / 1000;
-        response["freeHeap"] = ESP.getFreeHeap();
-        response["wifiRSSI"] = WiFi.RSSI();
-
-        sendRealtimeData(response);
-
-        return;
-    }
-
-    // ============================================================
-    // GET_USERS
-    // ============================================================
-
-    if (action == "GET_USERS") {
-
-        std::vector<UserInfo> users;
-
-        if (storage_.loadUsers(users)) {
-
-            JsonDocument response;
-
-            response["type"] = "users_list";
-            response["count"] = users.size();
-
-            JsonArray usersArray =
-                response["users"].to<JsonArray>();
-
-            for (const auto& user : users) {
-
-                JsonObject obj =
-                    usersArray.add<JsonObject>();
-
-                obj["username"] = user.username;
-                obj["role"] = user.role;
-                obj["lastLogin"] = user.lastLogin;
-            }
-
-            sendRealtimeData(response);
-
-        } else {
-
-            JsonDocument response;
-
-            response["type"] = "error";
-            response["message"] =
-                "No users found";
-
-            sendRealtimeData(response);
-        }
-
-        return;
-    }
-
-    // ============================================================
-    // GET_SITE_INFO
-    // ============================================================
-
-    if (action == "GET_SITE_INFO") {
-
-        SiteInfo info;
-
-        if (storage_.loadSiteInfo(info)) {
-
-            JsonDocument response;
-
-            response["type"] =
-                "site_info_response";
-
-            response["siteId"] =
-                info.siteId;
-
-            response["siteName"] =
-                info.siteName;
-
-            response["licenseKey"] =
-                info.licenseKey;
-
-            response["expiryDate"] =
-                info.expiryDate;
-
-            response["maxUsers"] =
-                info.maxUsers;
-
-            sendRealtimeData(response);
-
-        } else {
-
-            JsonDocument response;
-
-            response["type"] = "error";
-            response["message"] =
-                "No site info found";
-
-            sendRealtimeData(response);
-        }
-
-        return;
-    }
-
-    // ============================================================
-    // GET_REGISTRY
-    // ============================================================
-
-    if (action == "GET_REGISTRY") {
-
-        uint16_t regAddr =
-            doc["RegAdd"] | 0;
-
-        // ✅ لازم برای مسیر ریموت (sendRegistryFrame busDeviceId=0 را
-        // قبول نمی‌کند). پیش‌فرض 1، مطابق همان پیش‌فرضی که
-        // handleWriteRegistry برای WRITE_REGISTRY استفاده می‌کند.
-        uint8_t busDeviceId =
-            doc["DeviceId"] | 1;
-
-        Serial.printf(
-            "[WS] GET_REGISTRY: 0x%04X\n",
-            regAddr
-        );
-
-        // --------------------------------------------------------
-        // 1. Try local register first.
-        //
-        // CloudWebSocketServer does not know LocalRegisterMap.
-        // AppController decides whether the register is local.
-        //
-        // ✅ localReadCallback_ دیگر JsonDocument نمی‌گیرد؛ مقدار
-        // به‌صورت خام (RegisterRawValue) برمی‌گردد و فقط همین‌جا،
-        // در مرز خروجی پروتکل WebSocket، به JSON تبدیل می‌شود.
-        // --------------------------------------------------------
-
-        if (localReadCallback_) {
-
-            RegisterRawValue localValue;
-
-            if (
-                localReadCallback_(
-                    regAddr,
-                    localValue
-                )
-            ) {
-
-                Serial.printf(
-                    "[WS] ✅ Local registry read: 0x%04X\n",
-                    regAddr
-                );
-
-                JsonDocument wsMsg;
-
-                wsMsg["type"] =
-                    "registry_response";
-
-                wsMsg["RegAdd"] =
-                    regAddr;
-
-                assignRegisterRawValueToJson(
-                    wsMsg,
-                    "value",
-                    localValue
-                );
-
-                sendRealtimeData(wsMsg);
-
-                return;
-            }
-        }
-
-        // --------------------------------------------------------
-        // 2. Not local -> physical mYBUS
-        //
-        // ✅ دیگر از JsonDocument + sendMybusData استفاده نمی‌شود.
-        // فراخوانی مستقیم sendRegistryFrame یعنی فریم باینری
-        // (Read → payload بدون Value) بدون واسطه‌ی JSON ساخته و
-        // فرستاده می‌شود؛ دقیقاً همان مسیری که AppController::
-        // onCommandReceived برای GET_REGISTRY ریموت استفاده می‌کند.
-        // --------------------------------------------------------
-
-        Serial.printf(
-            "[WS] ℹ️ Registry 0x%04X is not local, "
-            "forwarding to mYBUS\n",
-            regAddr
-        );
-
-        JsonDocument response;
-
-        bool sent =
-            mybus_.sendRegistryFrame(
-                regAddr,
-                nullptr, 0,          // Read → بدون Value
-                /*isWrite=*/false,
-                busDeviceId,
-                nextRequestNumber(),
-                &response
-            );
-
-        bool readSuccess =
-            sent &&
-            (response["success"] | false);
-
-        if (readSuccess) {
-
-            JsonDocument wsMsg;
-
-            wsMsg["type"] =
-                "registry_response";
-
-            wsMsg["RegAdd"] =
-                regAddr;
-
-            if (!response["value"].isNull()) {
-
-                wsMsg["value"] =
-                    response["value"];
-            }
-
-            wsMsg["payloadHex"] =
-                response["payloadHex"] | "";
-
-            wsMsg["command"] =
-                response["command"] | 0;
-
-            wsMsg["flags"] =
-                response["flags"] | 0;
-
-            sendRealtimeData(wsMsg);
-
-        } else {
-
-            JsonDocument errorMsg;
-
-            errorMsg["type"] = "error";
-
-            errorMsg["message"] =
-                "Failed to read registry";
-
-            errorMsg["RegAdd"] =
-                regAddr;
-
-            if (!sent) {
-
-                errorMsg["reason"] =
-                    "transport_error";
-
-            } else if (
-                response["errorCode"].is<int>()
-            ) {
-
-                errorMsg["reason"] =
-                    "backend_error";
-
-                errorMsg["errorCode"] =
-                    response["errorCode"];
-
-            } else {
-
-                errorMsg["reason"] =
-                    "unknown";
-            }
-
-            sendRealtimeData(errorMsg);
-        }
-
-        return;
-    }
-
-    // ============================================================
-    // WRITE_REGISTRY
-    // ============================================================
-
-    if (action == "WRITE_REGISTRY") {
-
-        handleWriteRegistry(doc);
-
-        return;
-    }
-
-    // ============================================================
-    // COMMAND
-    // ============================================================
-
-    if (action == "COMMAND") {
-
-        JsonDocument response;
-
-        response["type"] = "error";
-
-        response["message"] =
-            "COMMAND action not supported "
-            "in refactored transport yet";
-
-        sendRealtimeData(response);
-
-        Serial.println(
-            "[WS] ⚠️ COMMAND action received "
-            "but not implemented"
-        );
-
-        return;
-    }
-
-    // ============================================================
-    // HANDSHAKE
-    // ============================================================
-
-    if (action == "HANDSHAKE") {
-
-        JsonDocument response;
-
-        response["type"] =
-            "handshake_response";
-
-        response["status"] =
-            "success";
-
-        response["message"] =
-            "Use HTTP /devices/handshake "
-            "for mYBUS v2";
-
-        sendRealtimeData(response);
-
-        return;
-    }
-
-    // ============================================================
-    // Unknown Action
-    // ============================================================
-
-    JsonDocument response;
-
-    response["type"] = "error";
-
-    response["message"] =
-        String("Unknown action: ") + action;
-
-    sendRealtimeData(response);
-
-    Serial.printf(
-        "[WS] Unknown action: %s\n",
-        action.c_str()
-    );
 }
 
-// ============================================================
-// WRITE_REGISTRY
-// ============================================================
 
-void CloudWebSocketServer::handleWriteRegistry(
-    JsonDocument& doc
-)
+// ============================================================
+// READ_REGISTRY
+// ============================================================
+void CloudWebSocketServer::handleReadRegistry(
+    const MyBusHeader& hdr,
+    const std::vector<uint8_t>& payload)
 {
-    Serial.println(
-        "[WS] 📝 WRITE_REGISTRY called"
-    );
-
-    uint16_t regAddr =
-        doc["RegAdd"] | 0;
-
-    String regVal =
-        doc["RegVal"] | "";
-
-    uint8_t busDeviceId =
-        doc["DeviceId"] | 1;
-
-    // ============================================================
-    // 1. Notify AppController.
-    //
-    // This allows local registers such as Audio Volume/Title/etc.
-    // to be handled by LocalRegisterMap.
-    // ============================================================
-
-    if (commandCallback_) {
-
-        JsonDocument localCmd;
-
-        localCmd["action"] =
-            "SET_REGISTRY";
-
-        localCmd["RegAdd"] =
-            regAddr;
-
-        localCmd["RegVal"] =
-            regVal;
-
-        localCmd["DeviceId"] =
-            busDeviceId;
-
-        commandCallback_(localCmd);
-    }
-
-    // ============================================================
-    // 2. Check whether physical mYBUS write must be skipped.
-    //
-    // Example:
-    //
-    // REG_AUDIO_VOLUME
-    //     local = true
-    //     mirrorToCloud = false
-    //
-    // Therefore:
-    //
-    //     LocalRegisterMap <- write
-    //     mYBUS            <- NO WRITE
-    // ============================================================
-
-    if (
-        shouldSkipMybusWriteCallback_ &&
-        shouldSkipMybusWriteCallback_(regAddr)
-    ) {
-
-        Serial.printf(
-            "[WS] ✅ Local register 0x%04X handled "
-            "without mYBUS forwarding\n",
-            regAddr
-        );
-
-        JsonDocument wsMsg;
-
-        wsMsg["type"] =
-            "registry_write_response";
-
-        wsMsg["RegAdd"] =
-            regAddr;
-
-        wsMsg["status"] =
-            "success";
-
-        sendRealtimeData(wsMsg);
-
+    if (payload.size() < 2) {
+        sendError(hdr.command, hdr.requestNumber, mybus_proto::REASON_BAD_REQUEST);
         return;
     }
 
-    // ============================================================
-    // 3. Non-local register OR mirrorToCloud=true
-    //    -> physical mYBUS
-    //
-    // ✅ دیگر از JsonDocument + sendMybusData استفاده نمی‌شود.
-    // رشته‌ی regVal مستقیماً (بر اساس نوع داده‌ی استخراج‌شده از
-    // خود آدرس رجیستر) به بایت خام تبدیل می‌شود و از طریق
-    // sendRegistryFrame به‌صورت فریم باینری فرستاده می‌شود؛
-    // دقیقاً همان الگویی که AppController::onCommandReceived
-    // برای SET_REGISTRY ریموت استفاده می‌کند.
-    // ============================================================
+    const uint16_t regAddr = static_cast<uint16_t>(payload[0] | (payload[1] << 8));
 
-    Serial.printf(
-        "[WS] ➡️ Forwarding register 0x%04X to mYBUS\n",
-        regAddr
-    );
+    Serial.printf("[WS] GET_REGISTRY: 0x%04X\n", regAddr);
 
-    uint8_t value[64] = {0};
+    // 1. رجیستر لوکال؟
+    if (localReadCallback_) {
+        RegisterRawValue localValue;
+        if (localReadCallback_(regAddr, localValue)) {
+            Serial.printf("[WS] ✅ Local registry read: 0x%04X\n", regAddr);
+            if (localValue.isString()) {
+                const uint8_t* bytes =
+                    reinterpret_cast<const uint8_t*>(localValue.stringValue.c_str());
+                sendRegistryReadResponse(hdr.requestNumber, regAddr, bytes,
+                                          localValue.stringValue.length());
+            } else {
+                sendRegistryReadResponse(hdr.requestNumber, regAddr,
+                                          localValue.bytes, localValue.byteLen);
+            }
+            return;
+        }
+    }
+
+    // 2. غیرلوکال -> mYBUS
+    Serial.printf("[WS] ℹ️ Registry 0x%04X not local, forwarding to mYBUS\n", regAddr);
+
+    const uint8_t busDeviceId = 1;
+
+    JsonDocument response;
+    const bool sent = mybus_.sendRegistryFrame(
+        regAddr, nullptr, 0, /*isWrite=*/false, busDeviceId, nextRequestNumber(), &response);
+
+    const bool readSuccess = sent && (response["success"] | false);
+
+    if (!readSuccess) {
+        const uint8_t reason = !sent ? mybus_proto::REASON_TRANSPORT_ERROR
+                                      : mybus_proto::REASON_BACKEND_ERROR;
+        sendError(hdr.command, hdr.requestNumber, reason, regAddr);
+        return;
+    }
+
+    std::vector<uint8_t> valueBytes;
+    hexStringToBytes(response["payloadHex"] | "", valueBytes);
+
+    sendRegistryReadResponse(hdr.requestNumber, regAddr, valueBytes.data(), valueBytes.size());
+}
+
+
+// ============================================================
+// WRITE_REGISTRY  (✅ کاملاً باینری)
+// ============================================================
+void CloudWebSocketServer::handleWriteRegistryFrame(
+    const MyBusHeader& hdr,
+    const std::vector<uint8_t>& payload)
+{
+    uint16_t regAddr = 0;
+    const uint8_t* value = nullptr;
     size_t valueLen = 0;
 
-    const MyBusDataType dataType =
-        static_cast<MyBusDataType>((regAddr >> 8) & 0x0F);
+    if (!mybus_parseRegistryPayload(payload.data(), payload.size(), regAddr, &value, valueLen) ||
+        valueLen == 0) {
+        sendError(hdr.command, hdr.requestNumber, mybus_proto::REASON_BAD_REQUEST);
+        return;
+    }
 
-    bool sent = false;
+    Serial.printf("[WS] 📝 WRITE_REGISTRY: 0x%04X (%u bytes)\n",
+                  regAddr, static_cast<unsigned>(valueLen));
+
+    const uint8_t busDeviceId = 1;
+
+    // ✅ باینری: مستقیم به AppController بدون JSON
+    if (binaryFrameCallback_) {
+        binaryFrameCallback_(hdr, payload);
+    }
+
+    // ✅ رجیستر لوکال؟
+    if (shouldSkipMybusWriteCallback_ && shouldSkipMybusWriteCallback_(regAddr)) {
+        Serial.printf("[WS] ✅ Local register 0x%04X handled without mYBUS forwarding\n", regAddr);
+        const uint8_t flags = (1U << MYBUS_FLAG_RSP_BIT);
+        sendControlFrame(mybus_proto::COMMAND_WRITE_REGISTRY, flags, hdr.requestNumber,
+                          payload.data(), 2);
+        return;
+    }
+
+    // ✅ غیرلوکال -> mYBUS باینری (بدون JSON)
     JsonDocument response;
+    const bool sent = mybus_.sendRegistryFrame(
+        regAddr, value, valueLen, /*isWrite=*/true, busDeviceId, nextRequestNumber(), &response);
 
-    if (
-        !regVal.isEmpty() &&
-        encodeRegValueString(
-            regVal,
-            dataType,
-            value,
-            sizeof(value),
-            valueLen
-        ) &&
-        valueLen > 0
-    ) {
+    const bool ok = sent && (response["success"] | false);
 
-        sent =
-            mybus_.sendRegistryFrame(
-                regAddr,
-                value,
-                valueLen,
-                /*isWrite=*/true,
-                busDeviceId,
-                nextRequestNumber(),
-                &response
-            );
-
+    if (ok) {
+        Serial.println("[WS] ✅ WRITE_REGISTRY successful");
+        const uint8_t flags = (1U << MYBUS_FLAG_RSP_BIT);
+        sendControlFrame(mybus_proto::COMMAND_WRITE_REGISTRY, flags, hdr.requestNumber,
+                          payload.data(), 2);
     } else {
+        Serial.println("[WS] ❌ WRITE_REGISTRY failed");
+        const uint8_t reason = !sent ? mybus_proto::REASON_TRANSPORT_ERROR
+                                      : mybus_proto::REASON_BACKEND_ERROR;
+        sendError(hdr.command, hdr.requestNumber, reason, regAddr);
+    }
+}
 
-        Serial.printf(
-            "[WS] ❌ Failed to encode value for remote write: "
-            "0x%04X = %s\n",
-            regAddr,
-            regVal.c_str()
-        );
+
+// ============================================================
+// STATUS
+// ============================================================
+void CloudWebSocketServer::handleGetStatus(uint16_t requestNumber)
+{
+    std::vector<uint8_t> payload;
+    ByteWriter w(payload);
+
+    w.u32(millis() / 1000);
+    w.u32(ESP.getFreeHeap());
+    w.i8(static_cast<int8_t>(WiFi.RSSI()));
+    w.str8(siteId_);
+    w.str8(deviceId_);
+
+    const uint8_t flags = (1U << MYBUS_FLAG_RSP_BIT);
+    sendControlFrame(mybus_proto::COMMAND_WS_STATUS, flags, requestNumber,
+                      payload.data(), payload.size());
+}
+
+
+// ============================================================
+// USERS_LIST
+// ============================================================
+void CloudWebSocketServer::handleGetUsers(uint16_t requestNumber)
+{
+    std::vector<UserInfo> users;
+
+    if (!storage_.loadUsers(users)) {
+        sendError(mybus_proto::COMMAND_WS_USERS_LIST, requestNumber, mybus_proto::REASON_NOT_FOUND);
+        return;
     }
 
-    bool registrySuccess =
-        sent &&
-        (response["success"] | false);
+    std::vector<uint8_t> payload;
+    ByteWriter w(payload);
 
-    if (registrySuccess) {
+    const uint8_t count = static_cast<uint8_t>(min(users.size(), static_cast<size_t>(255)));
+    w.u8(count);
 
-        Serial.println(
-            "[WS] ✅ WRITE_REGISTRY successful"
-        );
-
-        JsonDocument wsMsg;
-
-        wsMsg["type"] =
-            "registry_write_response";
-
-        wsMsg["RegAdd"] =
-            regAddr;
-
-        wsMsg["status"] =
-            "success";
-
-        wsMsg["command"] =
-            response["command"] | 0;
-
-        wsMsg["flags"] =
-            response["flags"] | 0;
-
-        sendRealtimeData(wsMsg);
-
-    } else {
-
-        Serial.println(
-            "[WS] ❌ WRITE_REGISTRY failed"
-        );
-
-        JsonDocument errorMsg;
-
-        errorMsg["type"] =
-            "error";
-
-        errorMsg["message"] =
-            "Failed to write registry";
-
-        errorMsg["RegAdd"] =
-            regAddr;
-
-        if (!sent) {
-
-            errorMsg["reason"] =
-                "transport_error";
-
-        } else if (
-            response["errorCode"].is<int>()
-        ) {
-
-            errorMsg["reason"] =
-                "backend_error";
-
-            errorMsg["errorCode"] =
-                response["errorCode"];
-
-        } else {
-
-            errorMsg["reason"] =
-                "unknown";
-        }
-
-        sendRealtimeData(errorMsg);
+    for (uint8_t i = 0; i < count; ++i) {
+        const auto& user = users[i];
+        w.str8(user.username);
+        w.str8(user.role);
+        w.u32(user.lastLogin);
     }
+
+    const uint8_t flags = (1U << MYBUS_FLAG_RSP_BIT);
+    sendControlFrame(mybus_proto::COMMAND_WS_USERS_LIST, flags, requestNumber,
+                      payload.data(), payload.size());
+}
+
+
+// ============================================================
+// SITE_INFO
+// ============================================================
+void CloudWebSocketServer::handleGetSiteInfo(uint16_t requestNumber)
+{
+    SiteInfo info;
+
+    if (!storage_.loadSiteInfo(info)) {
+        sendError(mybus_proto::COMMAND_WS_SITE_INFO, requestNumber, mybus_proto::REASON_NOT_FOUND);
+        return;
+    }
+
+    std::vector<uint8_t> payload;
+    ByteWriter w(payload);
+
+    w.str8(info.siteId);
+    w.str8(info.siteName);
+    w.str8(info.licenseKey);
+    w.u32(info.expiryDate);
+    w.u16(static_cast<uint16_t>(info.maxUsers));
+
+    const uint8_t flags = (1U << MYBUS_FLAG_RSP_BIT);
+    sendControlFrame(mybus_proto::COMMAND_WS_SITE_INFO, flags, requestNumber,
+                      payload.data(), payload.size());
 }
