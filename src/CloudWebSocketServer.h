@@ -9,6 +9,7 @@
 
 #include "MybusTransport.h"
 #include "CloudStorage.h"
+#include "RegisterRawValue.h"
 
 class CloudWebSocketServer {
 public:
@@ -32,7 +33,7 @@ public:
     using LocalRegistryReadCallback =
         std::function<bool(
             uint16_t addr,
-            JsonDocument& outValue
+            RegisterRawValue& outValu
         )>;
 
     // Called by WRITE_REGISTRY.

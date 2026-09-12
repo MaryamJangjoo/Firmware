@@ -11,14 +11,24 @@
 #include "CloudManager.h"
 #include "ecosmart_registeries.h"
 
+
+struct RawRegisterValue {
+    Reg_DataType_t datatype = reg_datatype_uint8;
+    bool isString = false;
+    String stringValue;
+    uint8_t bytes[8] = {0};
+    size_t byteLen = 0;
+};
+
 class AppController {
 public:
     AppController();
 
     void begin();
     void handle();
-    
+
 private:
+
     static constexpr int PIN_LED_1 = 33;
     static constexpr int PIN_LED_2 = 32;
     static constexpr int NUM_LEDS  = 30;
@@ -69,6 +79,7 @@ private:
     void initAudioHardware();
     void configureMybusAddress();
 
+
     void handleWiFiReconnect();
     void handleLedState();
 
@@ -79,16 +90,18 @@ private:
     void onBtData(const uint8_t* data, uint32_t len);
     static void btDataTrampoline(const uint8_t* data, uint32_t len);
 
-    // ---- Audio registry (Registery_t-based, reg_module_audio) ----
     Registery_t* findAudioRegistryEntry(uint16_t regAddr);
-    bool readAudioRegistry(uint16_t regAddr, JsonDocument& outValue);
+
+    bool readAudioRegistry(uint16_t regAddr, RawRegisterValue& outValue);
     bool writeAudioRegistry(uint16_t regAddr, const String& regVal);
 
+
     bool handleCurtainRegistryWrite(uint16_t regAddr, const String& regVal);
-    String getRegistryValue(uint16_t regAddr);  
-    bool readLocalRegistry(uint16_t regAddr, JsonDocument& outValue);
-    bool writeLocalRegistry(uint16_t regAddr, const String& regVal);   
-    void applyOutputsToHardware();                                 
+
+    String getRegistryValue(uint16_t regAddr);
+    bool readLocalRegistry(uint16_t regAddr, RawRegisterValue& outValue);
+    bool writeLocalRegistry(uint16_t regAddr, const String& regVal);
+    void applyOutputsToHardware();
 
     void onCommandReceived(const JsonDocument& command);
 

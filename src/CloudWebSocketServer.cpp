@@ -8,6 +8,74 @@
 #include "mybus_frame.h"
 #include "mybus_protocol_constants.h"
 #include "CloudStorage.h"
+#include "RegisterRawValue.h"   // ✅ اضافه شد: تایپ خام مشترک برای مقدار رجیستر
+
+// ============================================================
+// Helpers (anonymous namespace)
+// ============================================================
+
+namespace {
+
+// ✅ تنها جایی که RegisterRawValue به JsonDocument تبدیل می‌شود؛
+// این تبدیل مرز خروجی پروتکل WebSocket است (که ذاتاً JSON است)،
+// نه انتقال داخلی مقدار رجیستر.
+void assignRegisterRawValueToJson(JsonDocument& doc, const char* key, const RegisterRawValue& rv)
+{
+    if (rv.isString()) {
+        doc[key] = rv.stringValue;
+        return;
+    }
+
+    switch (rv.type) {
+        case RegRawType::BIT:
+            doc[key] = (rv.bytes[0] != 0);
+            break;
+        case RegRawType::UINT8:
+            doc[key] = rv.bytes[0];
+            break;
+        case RegRawType::UINT16: {
+            uint16_t v;
+            memcpy(&v, rv.bytes, sizeof(v));
+            doc[key] = v;
+            break;
+        }
+        case RegRawType::UINT32: {
+            uint32_t v;
+            memcpy(&v, rv.bytes, sizeof(v));
+            doc[key] = v;
+            break;
+        }
+        case RegRawType::INT8: {
+            int8_t v;
+            memcpy(&v, rv.bytes, sizeof(v));
+            doc[key] = v;
+            break;
+        }
+        case RegRawType::INT16: {
+            int16_t v;
+            memcpy(&v, rv.bytes, sizeof(v));
+            doc[key] = v;
+            break;
+        }
+        case RegRawType::INT32: {
+            int32_t v;
+            memcpy(&v, rv.bytes, sizeof(v));
+            doc[key] = v;
+            break;
+        }
+        case RegRawType::FLOAT: {
+            float v;
+            memcpy(&v, rv.bytes, sizeof(v));
+            doc[key] = v;
+            break;
+        }
+        default:
+            break;
+    }
+}
+
+} // namespace
+
 // ============================================================
 // Constructor
 // ============================================================
@@ -525,11 +593,15 @@ void CloudWebSocketServer::handleMessage(
         //
         // CloudWebSocketServer does not know LocalRegisterMap.
         // AppController decides whether the register is local.
+        //
+        // ✅ localReadCallback_ دیگر JsonDocument نمی‌گیرد؛ مقدار
+        // به‌صورت خام (RegisterRawValue) برمی‌گردد و فقط همین‌جا،
+        // در مرز خروجی پروتکل WebSocket، به JSON تبدیل می‌شود.
         // --------------------------------------------------------
 
         if (localReadCallback_) {
 
-            JsonDocument localValue;
+            RegisterRawValue localValue;
 
             if (
                 localReadCallback_(
@@ -551,11 +623,11 @@ void CloudWebSocketServer::handleMessage(
                 wsMsg["RegAdd"] =
                     regAddr;
 
-                if (!localValue["value"].isNull()) {
-
-                    wsMsg["value"] =
-                        localValue["value"];
-                }
+                assignRegisterRawValueToJson(
+                    wsMsg,
+                    "value",
+                    localValue
+                );
 
                 sendRealtimeData(wsMsg);
 
@@ -565,6 +637,9 @@ void CloudWebSocketServer::handleMessage(
 
         // --------------------------------------------------------
         // 2. Not local -> physical mYBUS
+        //
+        // این بخش خارج از دامنه‌ی تغییر است: MybusTransport::sendMybusData
+        // خودش JsonDocument می‌گیرد و دست‌نخورده باقی می‌ماند.
         // --------------------------------------------------------
 
         Serial.printf(

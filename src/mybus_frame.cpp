@@ -180,7 +180,6 @@ bool mybus_decryptFrame(const uint8_t *cipher, size_t cipherLen,
     return rc == 0;
 }
 
-// Wire Packing
 
 size_t mybus_packWireMessage(const uint8_t *iv, const uint8_t *tag,
                               const uint8_t *cipher, size_t cipherLen,
@@ -199,7 +198,6 @@ size_t mybus_packWireMessage(const uint8_t *iv, const uint8_t *tag,
     return total;
 }
 
-// Registry Payload Builders
 
 size_t mybus_buildReadRegistryPayload(
     uint16_t regAddr,
@@ -208,7 +206,6 @@ size_t mybus_buildReadRegistryPayload(
 
     if (outCapacity < 2) return 0;
 
-    // [AddrLow][AddrHigh]
     outPayload[0] = (uint8_t)(regAddr & 0xFF);
     outPayload[1] = (uint8_t)((regAddr >> 8) & 0xFF);
 
@@ -245,19 +242,14 @@ bool mybus_parseRegistryPayload(
 
     if (payloadLen < 2) return false;
 
-    // Read address (Little-Endian)
     outRegAddr = (uint16_t)(payload[0] | (payload[1] << 8));
 
-    // Value starts at byte 2
     outValueLen = payloadLen - 2;
     *outValue = (outValueLen > 0) ? (payload + 2) : nullptr;
 
     return true;
 }
 
-// ============================================================
-// Incoming Frame Validation
-// ============================================================
 
 const char* mybus_frameErrorToString(MyBusFrameError err) {
     switch (err) {
@@ -268,6 +260,7 @@ const char* mybus_frameErrorToString(MyBusFrameError err) {
         case MyBusFrameError::LENGTH_FIELD_MISMATCH:      return "Declared length != actual length";
         case MyBusFrameError::CRC_MISMATCH:               return "CRC32 mismatch";
         case MyBusFrameError::INTERFACE_MISMATCH:         return "Interface mismatch";
+        case MyBusFrameError::ZONE_MISMATCH:              return "Zone mismatch";
         case MyBusFrameError::RESERVED_FLAG_SET:          return "Reserved flag bit is set";
         case MyBusFrameError::COMMAND_NOT_ALLOWED:        return "Command not allowed (only Read/Write Registry)";
         default:                                          return "Unknown error";
@@ -278,6 +271,7 @@ bool mybus_validateFrame(
     const uint8_t* frame,
     size_t frameLen,
     uint8_t expectedInterfaceId,
+    int expectedZone,
     const uint8_t* allowedCommands,
     size_t allowedCommandsCount,
     MyBusHeader& outHdr,
@@ -289,19 +283,16 @@ bool mybus_validateFrame(
     if (outPayload)    *outPayload = nullptr;
     if (outPayloadLen) *outPayloadLen = 0;
 
-    // ---- 1. دریافت آرایه بایت ----
     if (frame == nullptr || frameLen == 0) {
         outError = MyBusFrameError::EMPTY_FRAME;
         return false;
     }
 
-    // ---- 2. چک نسخه پروتکل (آفست 0، فقط 1 بایت لازم است) ----
     if (frame[0] != MYBUS_PROTOCOL_VERSION) {
         outError = MyBusFrameError::PROTOCOL_VERSION_MISMATCH;
         return false;
     }
 
-    // ---- 3. چک حداقل طول بسته ----
     if (frameLen < MYBUS_MIN_FRAME_SIZE) {
         outError = MyBusFrameError::FRAME_TOO_SHORT;
         return false;
@@ -316,7 +307,7 @@ bool mybus_validateFrame(
 
     const size_t payloadLen = frameLen - MYBUS_MIN_FRAME_SIZE;
 
-    // ---- 4. چک CRC32 ----
+   
     const uint32_t expectedCrc =
         mybus_crc32(frame, MYBUS_HEADER_SIZE + payloadLen);
 
@@ -328,7 +319,7 @@ bool mybus_validateFrame(
         return false;
     }
 
-    // ---- هدر را پر کن (فریم تا اینجا معتبر است) ----
+    
     outHdr.protocolVersion = frame[0];
     outHdr.length          = declaredLen;
     outHdr.sequence        = frame[3];
@@ -344,13 +335,18 @@ bool mybus_validateFrame(
     outHdr.compression     = frame[14];
     outHdr.command         = frame[15];
 
-    // ---- 5. چک اینترفیس ----
+    
     if (outHdr.interfaceId != expectedInterfaceId) {
         outError = MyBusFrameError::INTERFACE_MISMATCH;
         return false;
     }
 
-    // ---- 6. چک پرچم‌ها (بیت‌های RSV طبق مستند پروتکل: 7،4،3،1 باید صفر باشند) ----
+    if (expectedZone >= 0 && outHdr.zone != static_cast<uint8_t>(expectedZone)) {
+        outError = MyBusFrameError::ZONE_MISMATCH;
+        return false;
+    }
+
+    
     static constexpr uint8_t MYBUS_FLAGS_RESERVED_MASK =
         (1U << 7) | (1U << 4) | (1U << 3) | (1U << 1);
 

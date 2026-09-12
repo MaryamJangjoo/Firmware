@@ -51,7 +51,58 @@ Registery_t* findInputRegistryEntry(uint16_t regAddr)
     return nullptr;
 }
 
+
+// ✅ فقط برای مرز خروجی WebSocket (نه انتقال داخلی مقدار)
+void assignRawValueToJson(JsonDocument& doc, const char* key, const RawRegisterValue& rv)
+{
+    if (rv.isString) {
+        doc[key] = rv.stringValue;
+        return;
+    }
+
+    switch (rv.datatype) {
+        case reg_datatype_bit:
+            doc[key] = (rv.bytes[0] != 0);
+            break;
+        case reg_datatype_uint8:
+            doc[key] = rv.bytes[0];
+            break;
+        case reg_datatype_uint16: {
+            uint16_t v; memcpy(&v, rv.bytes, sizeof(v));
+            doc[key] = v;
+            break;
+        }
+        case reg_datatype_uint32: {
+            uint32_t v; memcpy(&v, rv.bytes, sizeof(v));
+            doc[key] = v;
+            break;
+        }
+        case reg_datatype_int8: {
+            int8_t v; memcpy(&v, rv.bytes, sizeof(v));
+            doc[key] = v;
+            break;
+        }
+        case reg_datatype_int16: {
+            int16_t v; memcpy(&v, rv.bytes, sizeof(v));
+            doc[key] = v;
+            break;
+        }
+        case reg_datatype_int32: {
+            int32_t v; memcpy(&v, rv.bytes, sizeof(v));
+            doc[key] = v;
+            break;
+        }
+        case reg_datatype_float: {
+            float v; memcpy(&v, rv.bytes, sizeof(v));
+            doc[key] = v;
+            break;
+        }
+        default:
+            break;
+    }
 }
+
+} // namespace
 
 
 AppController::AppController()
@@ -170,6 +221,7 @@ bool AppController::connectToWiFi()
     return false;
 }
 
+
 void AppController::initCloudManager()
 {
     Serial.println("[CLOUD] Initializing CloudManager...");
@@ -180,7 +232,8 @@ void AppController::initCloudManager()
         onCommandReceived(cmd);
     });
 
-    cloudManager->onLocalRegistryRead([this](uint16_t regAddr, JsonDocument& outValue) {
+    // ✅ Callback لوکال (باینری)
+    cloudManager->onLocalRegistryRead([this](uint16_t regAddr, RawRegisterValue& outValue) {
         if (readAudioRegistry(regAddr, outValue)) return true;
         return readLocalRegistry(regAddr, outValue);
     });
@@ -192,6 +245,7 @@ void AppController::initCloudManager()
 
     Serial.println("[CLOUD] CloudManager initialized successfully");
 }
+
 
 void AppController::configureMybusAddress()
 {
@@ -207,6 +261,7 @@ void AppController::configureMybusAddress()
         cloudManager->setMybusZoneId(MYBUS_ZONE_ID);
     }
 }
+
 
 void AppController::initAudioHardware()
 {
@@ -264,11 +319,12 @@ void AppController::handleWiFiReconnect()
     }
 }
 
+
 void AppController::handleLedState()
 {
     if (lastLedState != ledState) {
         lastLedState = ledState;
-        
+
         for (size_t i = 0; i < OUTPUTS_NUMBER; i++) {
             outputs_object[i].value = ledState;
         }
@@ -285,6 +341,7 @@ void AppController::setCurtainOn()
     digitalWrite(PIN_SR_LATCH, HIGH);
 }
 
+
 void AppController::setCurtainOff()
 {
     digitalWrite(PIN_SR_LATCH, LOW);
@@ -293,17 +350,18 @@ void AppController::setCurtainOff()
     digitalWrite(PIN_SR_LATCH, HIGH);
 }
 
+
 void AppController::applyOutputsToHardware()
 {
     Serial.println("!!! 🔄 applyOutputsToHardware CALLED !!!");
-    
+
     uint8_t byteLow = 0;
     uint8_t byteHigh = 0;
 
     Serial.println("[OUTPUTS] Current states:");
     for (size_t i = 0; i < OUTPUTS_NUMBER; i++) {
-        Serial.printf("  [%zu] = %d (addr=0x%04X)\n", 
-                      i, outputs_object[i].value, 
+        Serial.printf("  [%zu] = %d (addr=0x%04X)\n",
+                      i, outputs_object[i].value,
                       reg_module_output.state[i].address);
         if (outputs_object[i].value) {
             if (i < 8) {
@@ -321,16 +379,20 @@ void AppController::applyOutputsToHardware()
     digitalWrite(PIN_SR_LATCH, LOW);
     shiftOut(PIN_SR_DATA, PIN_SR_CLOCK, LSBFIRST, byteLow);
     shiftOut(PIN_SR_DATA, PIN_SR_CLOCK, LSBFIRST, byteHigh);
-
     digitalWrite(PIN_SR_LATCH, HIGH);
 
     Serial.println("[OUTPUTS] ✅ Shift register updated");
 }
 
 
+// ============================================================
+// writeLocalRegistry — باینری (String -> uint8_t*)
+// ============================================================
+
 bool AppController::writeLocalRegistry(uint16_t regAddr, const String& regVal)
 {
-    Serial.printf("[REG] 🔍 writeLocalRegistry called: 0x%04X = '%s'\n", regAddr, regVal.c_str());
+    Serial.printf("[REG] 🔍 writeLocalRegistry called: 0x%04X = '%s'\n",
+                  regAddr, regVal.c_str());
 
     Registery_t* entry = findOutputRegistryEntry(regAddr);
 
@@ -339,10 +401,6 @@ bool AppController::writeLocalRegistry(uint16_t regAddr, const String& regVal)
         return false;
     }
 
-    Serial.printf("[REG] 🔍 Found entry: ref=%p, size=%u, datatype=%d\n",
-                  entry->ref, entry->size, entry->datatype);
-
-    
     bool isState = false;
     bool isTimer = false;
     size_t index = 0;
@@ -351,28 +409,22 @@ bool AppController::writeLocalRegistry(uint16_t regAddr, const String& regVal)
         if (&reg_module_output.state[i] == entry) {
             isState = true;
             index = i;
-            Serial.printf("    ➡️ This is state[%zu] (address 0x%04X), current value = %d\n",
-                          i, reg_module_output.state[i].address, outputs_object[i].value);
             break;
         }
         if (&reg_module_output.timer_permanent[i] == entry) {
             isTimer = true;
             index = i;
-            Serial.printf("    ➡️ This is timer_permanent[%zu] (address 0x%04X), current value = %u\n",
-                          i, reg_module_output.timer_permanent[i].address, outputs_object[i].timer_permanent);
             break;
         }
         if (&reg_module_output.timer_sleep[i] == entry) {
             isTimer = true;
             index = i;
-            Serial.printf("    ➡️ This is timer_sleep[%zu] (address 0x%04X), current value = %u\n",
-                          i, reg_module_output.timer_sleep[i].address, outputs_object[i].timer_sleep);
             break;
         }
     }
 
     if (!isState && !isTimer) {
-        Serial.printf("[REG] ⏭️ Not an output/timer register, skipping\n");
+        Serial.printf("[REG] ⏭️ Not an output/timer register\n");
         return false;
     }
 
@@ -396,21 +448,17 @@ bool AppController::writeLocalRegistry(uint16_t regAddr, const String& regVal)
     }
 
     memcpy(entry->ref, buf, len);
-
     Serial.printf("[REG] ✅ 0x%04X written\n", regAddr);
 
     if (isState) {
-        Serial.printf("[REG] 📊 state[%zu] new value = %d\n", index, outputs_object[index].value);
-        Serial.println("[REG] 🔄 CALLING applyOutputsToHardware()");
         applyOutputsToHardware();
     } else {
-        
-        Serial.printf("[REG] 📊 timer[%zu] stored = %u (metadata only, no hardware push)\n",
-                      index, *static_cast<uint16_t*>(entry->ref));
+        Serial.printf("[REG] 📊 timer[%zu] stored (metadata only)\n", index);
     }
 
     return true;
 }
+
 
 void AppController::visualizeAudio(const uint8_t* data, uint32_t len)
 {
@@ -433,12 +481,14 @@ void AppController::visualizeAudio(const uint8_t* data, uint32_t len)
     FastLED.show();
 }
 
+
 void AppController::onBtData(const uint8_t* data, uint32_t len)
 {
     size_t written;
     i2s_write(I2S_NUM_0, data, len, &written, portMAX_DELAY);
     visualizeAudio(data, len);
 }
+
 
 void AppController::btDataTrampoline(const uint8_t* data, uint32_t len)
 {
@@ -449,7 +499,7 @@ void AppController::btDataTrampoline(const uint8_t* data, uint32_t len)
 
 
 // ============================================================
-// Audio registry (reg_module_audio, Registery_t-based)
+// Audio registry
 // ============================================================
 
 Registery_t* AppController::findAudioRegistryEntry(uint16_t regAddr)
@@ -475,31 +525,41 @@ Registery_t* AppController::findAudioRegistryEntry(uint16_t regAddr)
     return nullptr;
 }
 
-bool AppController::readAudioRegistry(uint16_t regAddr, JsonDocument& outValue)
+
+bool AppController::readAudioRegistry(uint16_t regAddr, RawRegisterValue& outValue)
 {
     Registery_t* entry = findAudioRegistryEntry(regAddr);
     if (entry == nullptr || entry->ref == nullptr) {
         return false;
     }
 
+    outValue.datatype = entry->datatype;
+    outValue.isString = entry->isString;
+
     if (entry->isString) {
-        outValue["value"] = *static_cast<String*>(entry->ref);
-    } else {
-        switch (entry->datatype) {
-            case reg_datatype_uint8:
-                outValue["value"] = *static_cast<uint8_t*>(entry->ref);
-                break;
-            case reg_datatype_uint16:
-                outValue["value"] = *static_cast<uint16_t*>(entry->ref);
-                break;
-            default:
-                return false;
-        }
+        outValue.stringValue = *static_cast<String*>(entry->ref);
+        outValue.byteLen = 0;
+        return true;
     }
 
-    outValue["regAddr"] = regAddr;
+    switch (entry->datatype) {
+        case reg_datatype_uint8:
+            outValue.bytes[0] = *static_cast<uint8_t*>(entry->ref);
+            outValue.byteLen = sizeof(uint8_t);
+            break;
+        case reg_datatype_uint16: {
+            uint16_t v = *static_cast<uint16_t*>(entry->ref);
+            memcpy(outValue.bytes, &v, sizeof(v));
+            outValue.byteLen = sizeof(v);
+            break;
+        }
+        default:
+            return false;
+    }
+
     return true;
 }
+
 
 bool AppController::writeAudioRegistry(uint16_t regAddr, const String& regVal)
 {
@@ -509,7 +569,7 @@ bool AppController::writeAudioRegistry(uint16_t regAddr, const String& regVal)
     }
 
     if (!entry->writable) {
-        Serial.printf("[AUDIO] ❌ 0x%04X read-only است\n", regAddr);
+        Serial.printf("[AUDIO] ❌ 0x%04X read-only\n", regAddr);
         return false;
     }
 
@@ -521,21 +581,19 @@ bool AppController::writeAudioRegistry(uint16_t regAddr, const String& regVal)
 
         if (!encodeRegValueString(regVal, static_cast<MyBusDataType>(entry->datatype),
                                    buf, sizeof(buf), len)) {
-            Serial.printf("[AUDIO] ❌ Parse شکست خورد: '%s'\n", regVal.c_str());
+            Serial.printf("[AUDIO] ❌ Parse failed: '%s'\n", regVal.c_str());
             return false;
         }
 
         if (len != entry->size) {
-            Serial.printf("[AUDIO] ❌ Size mismatch در 0x%04X\n", regAddr);
+            Serial.printf("[AUDIO] ❌ Size mismatch at 0x%04X\n", regAddr);
             return false;
         }
 
-        // ⚠️ بدون spinlock: نوشتن از WebSocket task می‌آید، خواندن از
-        // loop() یا مسیر GET_REGISTRY. برخلاف LocalRegisterMap محافظت ندارد.
         memcpy(entry->ref, buf, len);
     }
 
-    // ---- Side effects (معادل handleAudioRegistryWrite قدیمی) ----
+    // ---- Side effects ----
     if (regAddr == REG_ADD_AUDIO_VOLUME) {
         uint8_t vol = audio_object.volume;
         if (vol > 124) vol = 124;
@@ -550,29 +608,23 @@ bool AppController::writeAudioRegistry(uint16_t regAddr, const String& regVal)
                 break;
             case 0:
             case 2:
-                Serial.printf("[AUDIO] ⏸️ Command %u (Stop/Pause pending btAudio API verification)\n",
-                              audio_object.control);
+                Serial.printf("[AUDIO] ⏸️ Command %u\n", audio_object.control);
                 break;
             default:
-                Serial.printf("[AUDIO] ⚠️ Unknown control command: %u\n", audio_object.control);
+                Serial.printf("[AUDIO] ⚠️ Unknown control: %u\n", audio_object.control);
                 break;
         }
 
     } else if (regAddr == REG_ADD_AUDIO_BASS) {
         Serial.printf("[AUDIO] Bass -> %u (not wired)\n", audio_object.bass);
-
     } else if (regAddr == REG_ADD_AUDIO_TREBLE) {
         Serial.printf("[AUDIO] Treble -> %u (not wired)\n", audio_object.treble);
-
     } else if (regAddr == REG_ADD_AUDIO_EQ) {
         Serial.printf("[AUDIO] EQ -> %u (not wired)\n", audio_object.eq);
-
     } else if (regAddr == REG_ADD_AUDIO_MODE) {
         Serial.printf("[AUDIO] Mode -> %u (not wired)\n", audio_object.mode);
-
     } else if (regAddr == REG_ADD_AUDIO_STATION) {
         Serial.printf("[AUDIO] Station -> %u (not wired)\n", audio_object.station);
-
     } else if (regAddr == REG_ADD_AUDIO_SLEEP_TIMER) {
         Serial.printf("[AUDIO] Sleep timer -> %u min (not wired)\n", audio_object.sleep_timer);
     }
@@ -594,14 +646,10 @@ bool AppController::handleCurtainRegistryWrite(uint16_t regAddr, const String& r
 }
 
 
-bool AppController::readLocalRegistry(uint16_t regAddr, JsonDocument& outValue)
+bool AppController::readLocalRegistry(uint16_t regAddr, RawRegisterValue& outValue)
 {
     Registery_t* entry = findOutputRegistryEntry(regAddr);
 
-    // ✅ اضافه شد: اگر بین Output/Timer پیدا نشد، Digital Input‌ها را
-    // هم بگرد (0x0000-0x000F). این‌ها هم Local/Hardware register هستند
-    // و طبق Registries Map باید بدون رفتن به مسیر mYBUS ریموت جواب
-    // داده شوند.
     if (entry == nullptr) {
         entry = findInputRegistryEntry(regAddr);
     }
@@ -610,57 +658,106 @@ bool AppController::readLocalRegistry(uint16_t regAddr, JsonDocument& outValue)
         return false;
     }
 
+    outValue.datatype = entry->datatype;
+    outValue.isString = false;
+
     switch (entry->datatype) {
         case reg_datatype_bit:
-            outValue["value"] = *static_cast<bool*>(entry->ref);
+            outValue.bytes[0] = (*static_cast<bool*>(entry->ref)) ? 1 : 0;
+            outValue.byteLen = 1;
             break;
-
         case reg_datatype_uint8:
-            outValue["value"] = *static_cast<uint8_t*>(entry->ref);
+            outValue.bytes[0] = *static_cast<uint8_t*>(entry->ref);
+            outValue.byteLen = sizeof(uint8_t);
             break;
-
-        case reg_datatype_uint16:
-            outValue["value"] = *static_cast<uint16_t*>(entry->ref);
+        case reg_datatype_uint16: {
+            uint16_t v = *static_cast<uint16_t*>(entry->ref);
+            memcpy(outValue.bytes, &v, sizeof(v));
+            outValue.byteLen = sizeof(v);
             break;
-
-        case reg_datatype_uint32:
-            outValue["value"] = *static_cast<uint32_t*>(entry->ref);
+        }
+        case reg_datatype_uint32: {
+            uint32_t v = *static_cast<uint32_t*>(entry->ref);
+            memcpy(outValue.bytes, &v, sizeof(v));
+            outValue.byteLen = sizeof(v);
             break;
-
-        case reg_datatype_int8:
-            outValue["value"] = *static_cast<int8_t*>(entry->ref);
+        }
+        case reg_datatype_int8: {
+            int8_t v = *static_cast<int8_t*>(entry->ref);
+            memcpy(outValue.bytes, &v, sizeof(v));
+            outValue.byteLen = sizeof(v);
             break;
-
-        case reg_datatype_int16:
-            outValue["value"] = *static_cast<int16_t*>(entry->ref);
+        }
+        case reg_datatype_int16: {
+            int16_t v = *static_cast<int16_t*>(entry->ref);
+            memcpy(outValue.bytes, &v, sizeof(v));
+            outValue.byteLen = sizeof(v);
             break;
-
-        case reg_datatype_int32:
-            outValue["value"] = *static_cast<int32_t*>(entry->ref);
+        }
+        case reg_datatype_int32: {
+            int32_t v = *static_cast<int32_t*>(entry->ref);
+            memcpy(outValue.bytes, &v, sizeof(v));
+            outValue.byteLen = sizeof(v);
             break;
-
-        case reg_datatype_float:
-            outValue["value"] = *static_cast<float*>(entry->ref);
+        }
+        case reg_datatype_float: {
+            float v = *static_cast<float*>(entry->ref);
+            memcpy(outValue.bytes, &v, sizeof(v));
+            outValue.byteLen = sizeof(v);
             break;
-
+        }
         default:
             return false;
     }
 
-    outValue["regAddr"] = regAddr;
     return true;
 }
 
 
 String AppController::getRegistryValue(uint16_t regAddr)
 {
-    JsonDocument doc;
+    RawRegisterValue rv;
 
-    if (!readLocalRegistry(regAddr, doc)) {
+    if (!readLocalRegistry(regAddr, rv)) {
         return "";
     }
 
-    return doc["value"].as<String>();
+    if (rv.isString) {
+        return rv.stringValue;
+    }
+
+    switch (rv.datatype) {
+        case reg_datatype_bit:
+            return String(rv.bytes[0] != 0 ? 1 : 0);
+        case reg_datatype_uint8:
+            return String(rv.bytes[0]);
+        case reg_datatype_uint16: {
+            uint16_t v; memcpy(&v, rv.bytes, sizeof(v));
+            return String(v);
+        }
+        case reg_datatype_uint32: {
+            uint32_t v; memcpy(&v, rv.bytes, sizeof(v));
+            return String(v);
+        }
+        case reg_datatype_int8: {
+            int8_t v; memcpy(&v, rv.bytes, sizeof(v));
+            return String(v);
+        }
+        case reg_datatype_int16: {
+            int16_t v; memcpy(&v, rv.bytes, sizeof(v));
+            return String(v);
+        }
+        case reg_datatype_int32: {
+            int32_t v; memcpy(&v, rv.bytes, sizeof(v));
+            return String(v);
+        }
+        case reg_datatype_float: {
+            float v; memcpy(&v, rv.bytes, sizeof(v));
+            return String(v, 6);
+        }
+        default:
+            return "";
+    }
 }
 
 
@@ -683,32 +780,27 @@ void AppController::onCommandReceived(const JsonDocument& command)
         uint16_t regAddr = command["RegAdd"] | 0;
         Serial.printf("[CMD] Get registry: 0x%04X\n", regAddr);
 
-        JsonDocument localValue;
+        // ✅ باینری: RawRegisterValue به‌جای JsonDocument
+        RawRegisterValue localValue;
         if (readAudioRegistry(regAddr, localValue) || readLocalRegistry(regAddr, localValue)) {
-            Serial.println("[CMD] ✅ Local registry read:");
-            serializeJson(localValue, Serial);
-            Serial.println();
+            Serial.println("[CMD] ✅ Local registry read");
 
             if (cloudManager != nullptr && cloudManager->isWebSocketConnected()) {
                 JsonDocument wsMsg;
                 wsMsg["type"] = "registry_response";
                 wsMsg["RegAdd"] = regAddr;
-                if (!localValue["value"].isNull()) {
-                    wsMsg["value"] = localValue["value"];
-                }
+                assignRawValueToJson(wsMsg, "value", localValue);
                 cloudManager->sendRealtimeData(wsMsg);
             }
-
             return;
         }
 
+        // ✅ باینری: sendRegistryFrame به‌جای sendMybusData
         if (cloudManager != nullptr && cloudManager->isSecureSessionEstablished()) {
-            JsonDocument req;
-            req["RegAdd"] = regAddr;
-            req["RegVal"] = "";
+            JsonDocument response;  // فقط خروجی از MybusTransport
+            bool sent = cloudManager->sendRegistryFrame(
+                regAddr, nullptr, 0, /*isWrite=*/false, /*busDeviceId=*/0, &response);
 
-            JsonDocument response;
-            bool sent = cloudManager->sendMybusData(req, &response);
             bool readSuccess = sent && (response["success"] | false);
 
             if (readSuccess) {
@@ -736,13 +828,6 @@ void AppController::onCommandReceived(const JsonDocument& command)
         String regVal = command["RegVal"] | "";
         Serial.printf("[CMD] Set registry: 0x%04X = %s\n", regAddr, regVal.c_str());
 
-        Registery_t* testEntry = findOutputRegistryEntry(regAddr);
-        if (testEntry != nullptr) {
-            Serial.printf("[CMD] 🔍 Found entry for 0x%04X in registry\n", regAddr);
-        } else {
-            Serial.printf("[CMD] 🔍 No entry found for 0x%04X in registry\n", regAddr);
-        }
-
         bool handledLocally = writeAudioRegistry(regAddr, regVal)
                             || handleCurtainRegistryWrite(regAddr, regVal)
                             || writeLocalRegistry(regAddr, regVal);
@@ -761,10 +846,30 @@ void AppController::onCommandReceived(const JsonDocument& command)
             cloudManager != nullptr &&
             cloudManager->isSecureSessionEstablished()) {
 
-            JsonDocument req;
-            req["RegAdd"] = regAddr;
-            req["RegVal"] = regVal;
-            cloudManager->sendMybusData(req);
+            // ✅ تبدیل رشته به بایت خام (منطق از MybusTransport::sendMybusData)
+            uint8_t value[64] = {0};
+            size_t valueLen = 0;
+
+            const MyBusDataType dataType =
+                static_cast<MyBusDataType>((regAddr >> 8) & 0x0F);
+
+            if (!regVal.isEmpty() &&
+                encodeRegValueString(regVal, dataType, value, sizeof(value), valueLen) &&
+                valueLen > 0) {
+
+                JsonDocument response;
+                bool sent = cloudManager->sendRegistryFrame(
+                    regAddr, value, valueLen, /*isWrite=*/true, /*busDeviceId=*/0, &response);
+
+                if (sent && (response["success"] | false)) {
+                    Serial.println("[CMD] ✅ Remote write OK");
+                } else {
+                    Serial.printf("[CMD] ❌ Remote write failed for 0x%04X\n", regAddr);
+                }
+            } else {
+                Serial.printf("[CMD] ❌ Failed to encode value for remote write: 0x%04X = %s\n",
+                              regAddr, regVal.c_str());
+            }
         }
     }
 }

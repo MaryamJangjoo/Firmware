@@ -173,11 +173,6 @@ bool MybusTransport::sendMybusBinaryFrame(
         return false;
     }
 
-    // --------------------------------------------------------
-    // Wire packet
-    // [IV][Ciphertext][TAG]
-    // --------------------------------------------------------
-
     const size_t wireCapacity =
         MYBUS_AES_IV_SIZE +
         plainLen +
@@ -217,10 +212,6 @@ bool MybusTransport::sendMybusBinaryFrame(
         )
     );
 
-    // --------------------------------------------------------
-    // HTTP
-    // --------------------------------------------------------
-
     std::vector<uint8_t> responseBytes;
     JsonDocument jsonError;
 
@@ -245,15 +236,6 @@ bool MybusTransport::sendMybusBinaryFrame(
 
         return false;
     }
-
-    // --------------------------------------------------------
-    // Parse response
-    //
-    // ✅ رفع باگ: قبلاً deviceId و requestNumber به تابع دیکد پاس
-    // داده نمی‌شدند و اعتبارسنجی نمی‌شدند. الان مقادیر مورد انتظار
-    // (همان‌هایی که در این درخواست فرستادیم) پاس داده می‌شوند تا
-    // پاسخ‌های قدیمی/جابه‌جاشده رد شوند.
-    // --------------------------------------------------------
 
     if (outResponse != nullptr &&
         !responseBytes.empty()) {
@@ -289,10 +271,6 @@ bool MybusTransport::sendMybusBinaryFrame(
     return true;
 }
 
-// ============================================================
-// Response decrypt + parse
-// ============================================================
-
 bool MybusTransport::decryptAndParseMybusResponse(
     const uint8_t* wireData,
     size_t wireLen,
@@ -324,10 +302,6 @@ bool MybusTransport::decryptAndParseMybusResponse(
         return false;
     }
 
-    // --------------------------------------------------------
-    // Wire parsing
-    // --------------------------------------------------------
-
     const uint8_t* iv =
         wireData;
 
@@ -345,9 +319,6 @@ bool MybusTransport::decryptAndParseMybusResponse(
         MYBUS_AES_IV_SIZE +
         cipherLen;
 
-    // --------------------------------------------------------
-    // Decrypt
-    // --------------------------------------------------------
 
     std::vector<uint8_t> plainFrame(
         cipherLen
@@ -380,32 +351,32 @@ bool MybusTransport::decryptAndParseMybusResponse(
         )
     );
 
-    // --------------------------------------------------------
-    // Parse frame
-    // --------------------------------------------------------
-
     MyBusHeader hdr;
 
     const uint8_t* payload = nullptr;
     size_t payloadLen = 0;
+    MyBusFrameError frameErr;
 
-    if (!mybus_parseFrame(
+    if (!mybus_validateFrame(
             plainFrame.data(),
             plainFrame.size(),
+            session_.interfaceId(),
+            static_cast<int>(session_.zone()),
+            MYBUS_ALLOWED_COMMANDS,
+            MYBUS_ALLOWED_COMMANDS_COUNT,
             hdr,
             &payload,
-            &payloadLen)) {
+            &payloadLen,
+            frameErr)) {
 
-        Serial.println(
-            "[mYBUS] ❌ Response frame parse failed"
+        Serial.printf(
+            "[mYBUS] ❌ Response frame invalid: %s\n",
+            mybus_frameErrorToString(frameErr)
         );
 
         return false;
     }
 
-    // --------------------------------------------------------
-    // Response should have RSP
-    // --------------------------------------------------------
 
     if ((hdr.flags & (1U << MYBUS_FLAG_RSP_BIT)) == 0) {
         Serial.println(
@@ -414,10 +385,6 @@ bool MybusTransport::decryptAndParseMybusResponse(
 
         return false;
     }
-
-    // --------------------------------------------------------
-    // Validate basic response identity
-    // --------------------------------------------------------
 
     if (hdr.interfaceId != session_.interfaceId()) {
         Serial.printf(
@@ -437,9 +404,6 @@ bool MybusTransport::decryptAndParseMybusResponse(
         return false;
     }
 
-    // ✅ اضافه شد: اعتبارسنجی deviceId و requestNumber پاسخ، تا یک
-    // پاسخ قدیمی یا اشتباه که فقط interface/zone یکسان دارد پذیرفته
-    // نشود.
 
     if (hdr.deviceId != expectedDeviceId) {
         Serial.printf(
@@ -460,10 +424,6 @@ bool MybusTransport::decryptAndParseMybusResponse(
 
         return false;
     }
-
-    // --------------------------------------------------------
-    // Response result
-    // --------------------------------------------------------
 
     const bool responseSuccess =
         (hdr.flags &
@@ -713,17 +673,6 @@ void MybusTransport::decodeRegistryResponseValue(
     }
 }
 
-// ============================================================
-// Registry frame
-//
-// ✅ رفع باگ: isWrite قبلاً کاملاً نادیده گرفته می‌شد ((void)isWrite;)
-// و read/write فقط با خالی‌بودن regVal/valueLen در لایه‌ی بالاتر
-// تشخیص داده می‌شد. الان اینجا هم یک اعتبارسنجی سازگاری انجام
-// می‌شود: اگر isWrite=true باشد اما valueLen صفر باشد (یا برعکس)،
-// درخواست رد می‌شود تا ناسازگاری بین قصد فراخواننده و داده‌ی واقعی
-// زودتر مشخص شود.
-// ============================================================
-
 bool MybusTransport::sendRegistryFrame(
     uint16_t regAddr,
     const uint8_t* regValue,
@@ -779,11 +728,6 @@ bool MybusTransport::sendRegistryFrame(
         return false;
     }
 
-    // --------------------------------------------------------
-    // Current backend registry codec format:
-    // [AddrLow][AddrHigh][Value...]
-    // --------------------------------------------------------
-
     const size_t payloadLen =
         2 + valueLen;
 
@@ -817,17 +761,13 @@ bool MybusTransport::sendRegistryFrame(
     flags |=
         (1U << MYBUS_FLAG_SCU_BIT);
 
-    // --------------------------------------------------------
-    // IMPORTANT:
-    // interface and zone come from Session
-    // --------------------------------------------------------
 
     const bool ok =
         sendMybusBinaryFrame(
-            0,                              // sequence
-            session_.interfaceId(),         // ✅ interface
-            session_.zone(),                // ✅ zone
-            busDeviceId,                    // ✅ numeric device ID
+            0,                              
+            session_.interfaceId(),         
+            session_.zone(),                
+            busDeviceId,                    
             static_cast<uint16_t>(
                 requestNumber & 0xFFFFU
             ),
@@ -853,14 +793,6 @@ bool MybusTransport::sendRegistryFrame(
 
     return ok;
 }
-
-// ============================================================
-// sendMybusData
-//
-// ✅ رفع باگ: قبلاً سوییچ نوشتن مقدار برای DT_UINT32/DT_INT8/DT_INT16
-// هیچ case ای نداشت و به default (رشته‌ی خام) می‌افتاد، درحالی‌که
-// decodeRegistryResponseValue این تایپ‌ها را کامل پشتیبانی می‌کند.
-// ============================================================
 
 bool MybusTransport::sendMybusData(
     JsonDocument& data,

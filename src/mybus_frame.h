@@ -210,6 +210,7 @@ enum class MyBusFrameError : uint8_t {
     LENGTH_FIELD_MISMATCH,
     CRC_MISMATCH,
     INTERFACE_MISMATCH,
+    ZONE_MISMATCH,
     RESERVED_FLAG_SET,
     COMMAND_NOT_ALLOWED
 };
@@ -220,6 +221,7 @@ bool mybus_validateFrame(
     const uint8_t* frame,
     size_t frameLen,
     uint8_t expectedInterfaceId,
+    int expectedZone,
     const uint8_t* allowedCommands,
     size_t allowedCommandsCount,
     MyBusHeader& outHdr,
