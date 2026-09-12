@@ -7,18 +7,12 @@
 
 #include "mybus_frame.h"
 #include "mybus_protocol_constants.h"
+#include "mybus_value_codec.h"  
 #include "CloudStorage.h"
-#include "RegisterRawValue.h"   // ✅ اضافه شد: تایپ خام مشترک برای مقدار رجیستر
-
-// ============================================================
-// Helpers (anonymous namespace)
-// ============================================================
+#include "RegisterRawValue.h"   
 
 namespace {
 
-// ✅ تنها جایی که RegisterRawValue به JsonDocument تبدیل می‌شود؛
-// این تبدیل مرز خروجی پروتکل WebSocket است (که ذاتاً JSON است)،
-// نه انتقال داخلی مقدار رجیستر.
 void assignRegisterRawValueToJson(JsonDocument& doc, const char* key, const RegisterRawValue& rv)
 {
     if (rv.isString()) {
@@ -74,11 +68,7 @@ void assignRegisterRawValueToJson(JsonDocument& doc, const char* key, const Regi
     }
 }
 
-} // namespace
-
-// ============================================================
-// Constructor
-// ============================================================
+} 
 
 CloudWebSocketServer::CloudWebSocketServer(
     MybusTransport& mybus,
@@ -93,9 +83,7 @@ CloudWebSocketServer::CloudWebSocketServer(
 {
 }
 
-// ============================================================
-// Destructor
-// ============================================================
+
 
 CloudWebSocketServer::~CloudWebSocketServer()
 {
@@ -583,6 +571,12 @@ void CloudWebSocketServer::handleMessage(
         uint16_t regAddr =
             doc["RegAdd"] | 0;
 
+        // ✅ لازم برای مسیر ریموت (sendRegistryFrame busDeviceId=0 را
+        // قبول نمی‌کند). پیش‌فرض 1، مطابق همان پیش‌فرضی که
+        // handleWriteRegistry برای WRITE_REGISTRY استفاده می‌کند.
+        uint8_t busDeviceId =
+            doc["DeviceId"] | 1;
+
         Serial.printf(
             "[WS] GET_REGISTRY: 0x%04X\n",
             regAddr
@@ -638,8 +632,11 @@ void CloudWebSocketServer::handleMessage(
         // --------------------------------------------------------
         // 2. Not local -> physical mYBUS
         //
-        // این بخش خارج از دامنه‌ی تغییر است: MybusTransport::sendMybusData
-        // خودش JsonDocument می‌گیرد و دست‌نخورده باقی می‌ماند.
+        // ✅ دیگر از JsonDocument + sendMybusData استفاده نمی‌شود.
+        // فراخوانی مستقیم sendRegistryFrame یعنی فریم باینری
+        // (Read → payload بدون Value) بدون واسطه‌ی JSON ساخته و
+        // فرستاده می‌شود؛ دقیقاً همان مسیری که AppController::
+        // onCommandReceived برای GET_REGISTRY ریموت استفاده می‌کند.
         // --------------------------------------------------------
 
         Serial.printf(
@@ -648,16 +645,14 @@ void CloudWebSocketServer::handleMessage(
             regAddr
         );
 
-        JsonDocument req;
-
-        req["RegAdd"] = regAddr;
-        req["RegVal"] = "";
-
         JsonDocument response;
 
         bool sent =
-            mybus_.sendMybusData(
-                req,
+            mybus_.sendRegistryFrame(
+                regAddr,
+                nullptr, 0,          // Read → بدون Value
+                /*isWrite=*/false,
+                busDeviceId,
                 nextRequestNumber(),
                 &response
             );
@@ -901,6 +896,13 @@ void CloudWebSocketServer::handleWriteRegistry(
     // ============================================================
     // 3. Non-local register OR mirrorToCloud=true
     //    -> physical mYBUS
+    //
+    // ✅ دیگر از JsonDocument + sendMybusData استفاده نمی‌شود.
+    // رشته‌ی regVal مستقیماً (بر اساس نوع داده‌ی استخراج‌شده از
+    // خود آدرس رجیستر) به بایت خام تبدیل می‌شود و از طریق
+    // sendRegistryFrame به‌صورت فریم باینری فرستاده می‌شود؛
+    // دقیقاً همان الگویی که AppController::onCommandReceived
+    // برای SET_REGISTRY ریموت استفاده می‌کند.
     // ============================================================
 
     Serial.printf(
@@ -908,25 +910,47 @@ void CloudWebSocketServer::handleWriteRegistry(
         regAddr
     );
 
-    JsonDocument req;
+    uint8_t value[64] = {0};
+    size_t valueLen = 0;
 
-    req["RegAdd"] =
-        regAddr;
+    const MyBusDataType dataType =
+        static_cast<MyBusDataType>((regAddr >> 8) & 0x0F);
 
-    req["RegVal"] =
-        regVal;
-
-    req["DeviceId"] =
-        busDeviceId;
-
+    bool sent = false;
     JsonDocument response;
 
-    bool sent =
-        mybus_.sendMybusData(
-            req,
-            nextRequestNumber(),
-            &response
+    if (
+        !regVal.isEmpty() &&
+        encodeRegValueString(
+            regVal,
+            dataType,
+            value,
+            sizeof(value),
+            valueLen
+        ) &&
+        valueLen > 0
+    ) {
+
+        sent =
+            mybus_.sendRegistryFrame(
+                regAddr,
+                value,
+                valueLen,
+                /*isWrite=*/true,
+                busDeviceId,
+                nextRequestNumber(),
+                &response
+            );
+
+    } else {
+
+        Serial.printf(
+            "[WS] ❌ Failed to encode value for remote write: "
+            "0x%04X = %s\n",
+            regAddr,
+            regVal.c_str()
         );
+    }
 
     bool registrySuccess =
         sent &&

@@ -52,7 +52,7 @@ Registery_t* findInputRegistryEntry(uint16_t regAddr)
 }
 
 
-// ✅ فقط برای مرز خروجی WebSocket (نه انتقال داخلی مقدار)
+
 void assignRawValueToJson(JsonDocument& doc, const char* key, const RawRegisterValue& rv)
 {
     if (rv.isString) {
@@ -102,8 +102,7 @@ void assignRawValueToJson(JsonDocument& doc, const char* key, const RawRegisterV
     }
 }
 
-} // namespace
-
+} 
 
 AppController::AppController()
     : amp(&Wire),
@@ -232,10 +231,34 @@ void AppController::initCloudManager()
         onCommandReceived(cmd);
     });
 
-    // ✅ Callback لوکال (باینری)
-    cloudManager->onLocalRegistryRead([this](uint16_t regAddr, RawRegisterValue& outValue) {
-        if (readAudioRegistry(regAddr, outValue)) return true;
-        return readLocalRegistry(regAddr, outValue);
+    cloudManager->onLocalRegistryRead([this](uint16_t regAddr, RegisterRawValue& outValue) {
+        RawRegisterValue rv;
+
+        if (!readAudioRegistry(regAddr, rv) && !readLocalRegistry(regAddr, rv)) {
+            return false;
+        }
+
+        outValue.stringValue = rv.stringValue;
+        outValue.byteLen = rv.byteLen;
+        memcpy(outValue.bytes, rv.bytes, sizeof(outValue.bytes));
+
+        if (rv.isString) {
+            outValue.type = RegRawType::STRING;
+        } else {
+            switch (rv.datatype) {
+                case reg_datatype_bit:    outValue.type = RegRawType::BIT;    break;
+                case reg_datatype_uint8:  outValue.type = RegRawType::UINT8;  break;
+                case reg_datatype_uint16: outValue.type = RegRawType::UINT16; break;
+                case reg_datatype_uint32: outValue.type = RegRawType::UINT32; break;
+                case reg_datatype_int8:   outValue.type = RegRawType::INT8;   break;
+                case reg_datatype_int16:  outValue.type = RegRawType::INT16;  break;
+                case reg_datatype_int32:  outValue.type = RegRawType::INT32;  break;
+                case reg_datatype_float:  outValue.type = RegRawType::FLOAT;  break;
+                default:                  outValue.type = RegRawType::UINT8; break;
+            }
+        }
+
+        return true;
     });
 
     cloudManager->onShouldSkipMybusWrite([this](uint16_t regAddr) {
@@ -384,11 +407,6 @@ void AppController::applyOutputsToHardware()
     Serial.println("[OUTPUTS] ✅ Shift register updated");
 }
 
-
-// ============================================================
-// writeLocalRegistry — باینری (String -> uint8_t*)
-// ============================================================
-
 bool AppController::writeLocalRegistry(uint16_t regAddr, const String& regVal)
 {
     Serial.printf("[REG] 🔍 writeLocalRegistry called: 0x%04X = '%s'\n",
@@ -497,11 +515,6 @@ void AppController::btDataTrampoline(const uint8_t* data, uint32_t len)
     }
 }
 
-
-// ============================================================
-// Audio registry
-// ============================================================
-
 Registery_t* AppController::findAudioRegistryEntry(uint16_t regAddr)
 {
     Registery_t* candidates[] = {
@@ -593,7 +606,6 @@ bool AppController::writeAudioRegistry(uint16_t regAddr, const String& regVal)
         memcpy(entry->ref, buf, len);
     }
 
-    // ---- Side effects ----
     if (regAddr == REG_ADD_AUDIO_VOLUME) {
         uint8_t vol = audio_object.volume;
         if (vol > 124) vol = 124;
@@ -780,7 +792,6 @@ void AppController::onCommandReceived(const JsonDocument& command)
         uint16_t regAddr = command["RegAdd"] | 0;
         Serial.printf("[CMD] Get registry: 0x%04X\n", regAddr);
 
-        // ✅ باینری: RawRegisterValue به‌جای JsonDocument
         RawRegisterValue localValue;
         if (readAudioRegistry(regAddr, localValue) || readLocalRegistry(regAddr, localValue)) {
             Serial.println("[CMD] ✅ Local registry read");
@@ -795,9 +806,8 @@ void AppController::onCommandReceived(const JsonDocument& command)
             return;
         }
 
-        // ✅ باینری: sendRegistryFrame به‌جای sendMybusData
         if (cloudManager != nullptr && cloudManager->isSecureSessionEstablished()) {
-            JsonDocument response;  // فقط خروجی از MybusTransport
+            JsonDocument response;  
             bool sent = cloudManager->sendRegistryFrame(
                 regAddr, nullptr, 0, /*isWrite=*/false, /*busDeviceId=*/0, &response);
 
@@ -846,7 +856,6 @@ void AppController::onCommandReceived(const JsonDocument& command)
             cloudManager != nullptr &&
             cloudManager->isSecureSessionEstablished()) {
 
-            // ✅ تبدیل رشته به بایت خام (منطق از MybusTransport::sendMybusData)
             uint8_t value[64] = {0};
             size_t valueLen = 0;
 
