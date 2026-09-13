@@ -59,7 +59,7 @@ public:
 
 private:
 
-    String apiBaseUrl_ = "http://192.168.88.184:3000";
+    String apiBaseUrl_ = "http://192.168.88.177:3000";
     String deviceId_;
     String jwtToken_;
     String siteId_;

@@ -6,7 +6,7 @@
 #include <WiFi.h>
 #include "mybus_value_codec.h"
 #include "mybus_protocol_constants.h"
-
+#include <esp_wifi.h>
 #ifndef WIFI_STA
 #define WIFI_STA 1
 #endif
@@ -139,19 +139,158 @@ void AppController::handle()
 }
 
 
+// ============================================================
+// نسخه‌ی بهبودیافته‌ی AppController::connectToWiFi()
+// جایگزین تابع فعلی در src/AppController.cpp کن.
+//
+// تغییرات نسبت به نسخه‌ی قبلی:
+//  1) قبل از اتصال، اسکن شبکه‌ها انجام می‌شه و SSID هدف با
+//     RSSI و نوع امنیت (Encryption) چاپ می‌شه. اگه SSID اصلاً
+//     دیده نشه یعنی مشکل از باند (5GHz) یا دید رادیویی است،
+//     نه از پسورد.
+//  2) در حلقه‌ی انتظار، به‌جای فقط چاپ نقطه، کد دقیق
+//     WiFi.status() هم چاپ می‌شه تا فرق بین «SSID دیده نشد»
+//     (WL_NO_SSID_AVAIL) و «پسورد رد شد» (WL_CONNECT_FAILED)
+//     مشخص بشه.
+//  3) MAC آدرس ESP32 چاپ می‌شه تا در صورت نیاز به MAC filtering
+//     روتر اضافه بشه.
+// ============================================================
+
+// ------------------------------------------------------
+// Forward declaration - چون تعریف کامل تابع پایین همین فایل
+// (بعد از connectToWiFi) قرار داره، کامپایلر باید از قبل
+// امضای تابع رو ببینه.
+// این خط رو بالای src/AppController.cpp، بعد از include ها،
+// و قبل از تعریف AppController::connectToWiFi اضافه کن.
+// ------------------------------------------------------
+static const char* wifiStatusToString(wl_status_t status);
+
+// نکته: برای esp_wifi_set_country / wifi_country_t باید این include
+// بالای فایل src/AppController.cpp اضافه بشه (کنار #include <WiFi.h>):
+//   #include <esp_wifi.h>
+
 bool AppController::connectToWiFi()
 {
+    Serial.println();
+    Serial.print("[WiFi] MAC Address: ");
+    Serial.println(WiFi.macAddress());
+
+    WiFi.mode(WIFI_STA);
+    WiFi.disconnect(true);
+    delay(100);
+
+    // ------------------------------------------------------
+    // مهم: ESP32 به‌صورت پیش‌فرض کد کشوری استفاده می‌کنه که فقط
+    // کانال‌های ۱ تا ۱۱ رو مجاز می‌دونه. اگه روتر شما (مثل اینجا)
+    // روی کانال ۱۲/۱۳ پخش می‌کنه، رادیو حتی اگه شبکه رو توی اسکن
+    // ببینه، اجازه‌ی اتصال بهش رو نمی‌ده و نتیجه NO_SSID_AVAIL
+    // می‌شه. این تنظیم صراحتاً کانال ۱ تا ۱۳ رو باز می‌کنه.
+    // ------------------------------------------------------
+    {
+        wifi_country_t country = {};
+        strncpy(country.cc, "AZ", sizeof(country.cc)); // کد کشور با کانال ۱۳ مجاز
+        country.schan = 1;
+        country.nchan = 13;
+        country.policy = WIFI_COUNTRY_POLICY_MANUAL;
+        esp_wifi_set_country(&country);
+    }
+
+
+    Serial.println("[WiFi] Scanning networks...");
+    int networksFound = WiFi.scanNetworks();
+
+    bool targetFoundOn24GHz = false;
+    bool targetIsOpen = false;
+
+    if (networksFound == 0) {
+        Serial.println("[WiFi] ⚠️ No networks found at all (radio issue?)");
+    } else {
+        Serial.printf("[WiFi] Found %d networks:\n", networksFound);
+
+        for (int i = 0; i < networksFound; i++) {
+            String ssid = WiFi.SSID(i);
+            int32_t rssi = WiFi.RSSI(i);
+            wifi_auth_mode_t enc = WiFi.encryptionType(i);
+            int32_t channel = WiFi.channel(i);
+
+            const char* encStr;
+            switch (enc) {
+                case WIFI_AUTH_OPEN:            encStr = "OPEN";        break;
+                case WIFI_AUTH_WEP:             encStr = "WEP";         break;
+                case WIFI_AUTH_WPA_PSK:         encStr = "WPA_PSK";     break;
+                case WIFI_AUTH_WPA2_PSK:        encStr = "WPA2_PSK";    break;
+                case WIFI_AUTH_WPA_WPA2_PSK:    encStr = "WPA_WPA2_PSK";break;
+                case WIFI_AUTH_WPA2_ENTERPRISE: encStr = "WPA2_ENT";    break;
+                case WIFI_AUTH_WPA3_PSK:        encStr = "WPA3_PSK";    break;
+                case WIFI_AUTH_WPA2_WPA3_PSK:   encStr = "WPA2_WPA3";   break;
+                default:                        encStr = "UNKNOWN";    break;
+            }
+
+            Serial.printf("  [%d] SSID='%s' RSSI=%d Channel=%d Enc=%s\n",
+                          i, ssid.c_str(), rssi, channel, encStr);
+
+            if (ssid == String(WIFI_SSID)) {
+                targetFoundOn24GHz = true;
+                targetIsOpen = (enc == WIFI_AUTH_OPEN);
+
+                Serial.printf(
+                    "[WiFi] ✅ Target SSID found (RSSI=%d, Enc=%s)\n",
+                    rssi, encStr
+                );
+
+                if (enc == WIFI_AUTH_WPA3_PSK) {
+                    Serial.println(
+                        "[WiFi] ⚠️ Network is WPA3-only - ESP32 may fail to connect. "
+                        "Try switching router to WPA2-PSK (AES)."
+                    );
+                }
+            }
+        }
+
+        if (!targetFoundOn24GHz) {
+            Serial.printf(
+                "[WiFi] ❌ Target SSID '%s' was NOT found in scan.\n",
+                WIFI_SSID
+            );
+            Serial.println(
+                "[WiFi] This usually means: (a) router broadcasts this SSID "
+                "only on 5GHz (ESP32 supports 2.4GHz only), or (b) SSID/typo mismatch, "
+                "or (c) router too far / hidden SSID."
+            );
+        }
+    }
+
+    WiFi.scanDelete();
+
+
     Serial.println();
     Serial.print("[WiFi] Connecting to ");
     Serial.println(WIFI_SSID);
 
-    WiFi.mode(WIFI_STA);
-    WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
+    if (targetIsOpen) {
+        Serial.println(
+            "[WiFi] ℹ️ Target network scanned as OPEN - connecting without password"
+        );
+        WiFi.begin(WIFI_SSID);
+    } else {
+        WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
+    }
 
     int attempts = 0;
+    wl_status_t lastStatus = WL_IDLE_STATUS;
+
     while (WiFi.status() != WL_CONNECTED && attempts < 30) {
         delay(500);
-        Serial.print(".");
+
+        wl_status_t status = WiFi.status();
+        if (status != lastStatus) {
+            Serial.printf("\n[WiFi] status=%d (%s)\n",
+                          status, wifiStatusToString(status));
+            lastStatus = status;
+        } else {
+            Serial.print(".");
+        }
+
         attempts++;
     }
     Serial.println();
@@ -160,20 +299,37 @@ bool AppController::connectToWiFi()
         Serial.println("[WiFi] ✅ Connected!");
         Serial.print("[WiFi] 📶 IP: ");
         Serial.println(WiFi.localIP());
+        Serial.printf("[WiFi] RSSI: %d dBm\n", WiFi.RSSI());
         return true;
     }
-    Serial.println("[WiFi] ❌ Connection failed!");
+
+    Serial.printf(
+        "[WiFi] ❌ Connection failed! Final status=%d (%s)\n",
+        WiFi.status(), wifiStatusToString(WiFi.status())
+    );
+
     return false;
 }
 
+static const char* wifiStatusToString(wl_status_t status)
+{
+    switch (status) {
+        case WL_IDLE_STATUS:     return "IDLE";
+        case WL_NO_SSID_AVAIL:   return "NO_SSID_AVAIL";
+        case WL_SCAN_COMPLETED:  return "SCAN_COMPLETED";
+        case WL_CONNECTED:       return "CONNECTED";
+        case WL_CONNECT_FAILED:  return "CONNECT_FAILED";
+        case WL_CONNECTION_LOST: return "CONNECTION_LOST";
+        case WL_DISCONNECTED:    return "DISCONNECTED";
+        default:                 return "UNKNOWN";
+    }
+}
 
 void AppController::initCloudManager()
 {
     Serial.println("[CLOUD] Initializing CloudManager...");
     cloudManager = new CloudManager();
-    cloudManager->setApiBaseUrl("http://192.168.88.184:3000");
-
-    // ✅ callback جدید: باینری (بدون JsonDocument)
+    cloudManager->setApiBaseUrl("http://192.168.88.177:3000");
     cloudManager->onBinaryFrame([this](
         const MyBusHeader& hdr,
         const std::vector<uint8_t>& payload

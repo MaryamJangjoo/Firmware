@@ -62,10 +62,6 @@ CloudManager::CloudManager()
             "[CLOUD] ❌ Preferences begin failed"
         );
     }
-    preferences_.remove("deviceId");
-    preferences_.remove("mybusDev");
-    preferences_.remove("mybusZone");
-    Serial.println("[CLOUD] 🗑️ Old deviceId/mybusDev/mybusZone removed from Preferences");
 
 
 
@@ -125,6 +121,7 @@ CloudManager::CloudManager()
     } else {
 
         storage_.createDefaultUsersFile();
+        storage_.createDefaultSiteInfoFile();
     }
 
 
