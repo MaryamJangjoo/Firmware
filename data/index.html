@@ -1,32 +1,50 @@
 <!DOCTYPE html>
-<html lang="en">
-
+<html lang="fa" dir="rtl">
 <head>
-    <meta charset="UTF-8" />
-    <title>Smart Home Living Dashboard</title>
-    <link rel="stylesheet" href="style.css" />
-    <script type="module" src="main.js" crossorigin="anonymous"></script>
+    <meta charset="UTF-8">
+    <title>EcoSmart Device</title>
+    <style>
+        body {
+            font-family: Tahoma, sans-serif;
+            background: #1a1a2e;
+            color: #eee;
+            padding: 20px;
+        }
+        h1 { color: #00d4ff; }
+        .card {
+            background: rgba(255,255,255,0.05);
+            border-radius: 12px;
+            padding: 20px;
+            margin: 10px 0;
+        }
+        .value { color: #ffcc00; font-weight: bold; }
+    </style>
 </head>
-
 <body>
-    <theme-toggle></theme-toggle>
-    <scene-switcher></scene-switcher>
-    <smart-narrator></smart-narrator>
-
-    <div class="grid">
-        <div class="card"><light-toggle></light-toggle></div>
-        <div class="card"><temp-display></temp-display></div>
-        <div class="card"><volume-slider></volume-slider></div>
-        <div class="card"><audio-visualizer></audio-visualizer></div>
-        <div class="card"><energy-chart></energy-chart></div>
-        <div class="card"><smart-map></smart-map></div>
-        <div class="card"><smart-suggestions></smart-suggestions></div>
-        <div class="card"><system-health></system-health></div>
-        <div class="card"><dev-panel></dev-panel></div>
+    <h1>🌐 EcoSmart Device</h1>
+    
+    <div class="card">
+        <h2>وضعیت دستگاه</h2>
+        <p>Device ID: <span class="value" id="deviceId">-</span></p>
+        <p>Serial: <span class="value" id="serialNumber">-</span></p>
+        <p>Firmware: <span class="value" id="firmwareVersion">-</span></p>
+        <p>Uptime: <span class="value" id="uptime">-</span>s</p>
+        <p>RAM Free: <span class="value" id="ramFree">-</span> bytes</p>
+        <p>WiFi RSSI: <span class="value" id="wifiRSSI">-</span> dBm</p>
     </div>
 
-    <!-- <object type="image/svg+xml" data="graphics.svg" style="display:none;"></object> -->
+    <script>
+        fetch('/info')
+            .then(r => r.json())
+            .then(data => {
+                document.getElementById('deviceId').textContent = data.deviceId;
+                document.getElementById('serialNumber').textContent = data.serialNumber;
+                document.getElementById('firmwareVersion').textContent = data.firmwareVersion;
+                document.getElementById('uptime').textContent = data.uptime;
+                document.getElementById('ramFree').textContent = data.ramFree;
+                document.getElementById('wifiRSSI').textContent = data.wifiRSSI;
+            })
+            .catch(err => console.error(err));
+    </script>
 </body>
-
 </html>
-

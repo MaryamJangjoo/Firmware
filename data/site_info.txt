@@ -1,8 +1,0 @@
-{
-  "siteId": "SITE-001",
-  "siteName": "Test Site",
-  "licenseKey": "LIC-001",
-  "expiryDate": 0,
-  "maxUsers": 10,
-  "updatedAt": 0
-}

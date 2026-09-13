@@ -45,7 +45,6 @@ public:
     void loopWebSocketServer();
     bool isWebSocketConnected() const;
 
-    // ✅ callback جدید: باینری
     void onBinaryFrame(CloudWebSocketServer::BinaryFrameCallback cb);
 
     void onLocalRegistryRead(CloudWebSocketServer::LocalRegistryReadCallback cb);
@@ -59,7 +58,7 @@ public:
 
 private:
 
-    String apiBaseUrl_ = "http://192.168.88.177:3000";
+    String apiBaseUrl_ = "http://192.168.88.171:3000";
     String deviceId_;
     String jwtToken_;
     String siteId_;

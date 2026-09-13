@@ -7,6 +7,8 @@
 #include "mybus_value_codec.h"
 #include "mybus_protocol_constants.h"
 #include <esp_wifi.h>
+#include <ESPmDNS.h>
+
 #ifndef WIFI_STA
 #define WIFI_STA 1
 #endif
@@ -84,6 +86,19 @@ void AppController::begin()
         return;
     }
 
+    // ═══════════════════════════════════════════════════════
+    // ✅ mDNS: ecosmart.local
+    // ═══════════════════════════════════════════════════════
+    if (!MDNS.begin("ecosmart")) {
+        Serial.println("[mDNS] ❌ Failed to start");
+    } else {
+        Serial.println("[mDNS] ✅ Started: http://ecosmart.local");
+        MDNS.addService("http", "tcp", 80);
+        MDNS.addService("ws", "tcp", 80);
+        MDNS.addServiceTxt("http", "tcp", "device", "EcoSmart");
+        MDNS.addServiceTxt("http", "tcp", "version", "2.0.0");
+    }
+
     initCloudManager();
     configureMybusAddress();
 
@@ -140,34 +155,10 @@ void AppController::handle()
 
 
 // ============================================================
-// نسخه‌ی بهبودیافته‌ی AppController::connectToWiFi()
-// جایگزین تابع فعلی در src/AppController.cpp کن.
-//
-// تغییرات نسبت به نسخه‌ی قبلی:
-//  1) قبل از اتصال، اسکن شبکه‌ها انجام می‌شه و SSID هدف با
-//     RSSI و نوع امنیت (Encryption) چاپ می‌شه. اگه SSID اصلاً
-//     دیده نشه یعنی مشکل از باند (5GHz) یا دید رادیویی است،
-//     نه از پسورد.
-//  2) در حلقه‌ی انتظار، به‌جای فقط چاپ نقطه، کد دقیق
-//     WiFi.status() هم چاپ می‌شه تا فرق بین «SSID دیده نشد»
-//     (WL_NO_SSID_AVAIL) و «پسورد رد شد» (WL_CONNECT_FAILED)
-//     مشخص بشه.
-//  3) MAC آدرس ESP32 چاپ می‌شه تا در صورت نیاز به MAC filtering
-//     روتر اضافه بشه.
+// WiFi Connection (improved with scan + country)
 // ============================================================
 
-// ------------------------------------------------------
-// Forward declaration - چون تعریف کامل تابع پایین همین فایل
-// (بعد از connectToWiFi) قرار داره، کامپایلر باید از قبل
-// امضای تابع رو ببینه.
-// این خط رو بالای src/AppController.cpp، بعد از include ها،
-// و قبل از تعریف AppController::connectToWiFi اضافه کن.
-// ------------------------------------------------------
 static const char* wifiStatusToString(wl_status_t status);
-
-// نکته: برای esp_wifi_set_country / wifi_country_t باید این include
-// بالای فایل src/AppController.cpp اضافه بشه (کنار #include <WiFi.h>):
-//   #include <esp_wifi.h>
 
 bool AppController::connectToWiFi()
 {
@@ -180,21 +171,16 @@ bool AppController::connectToWiFi()
     delay(100);
 
     // ------------------------------------------------------
-    // مهم: ESP32 به‌صورت پیش‌فرض کد کشوری استفاده می‌کنه که فقط
-    // کانال‌های ۱ تا ۱۱ رو مجاز می‌دونه. اگه روتر شما (مثل اینجا)
-    // روی کانال ۱۲/۱۳ پخش می‌کنه، رادیو حتی اگه شبکه رو توی اسکن
-    // ببینه، اجازه‌ی اتصال بهش رو نمی‌ده و نتیجه NO_SSID_AVAIL
-    // می‌شه. این تنظیم صراحتاً کانال ۱ تا ۱۳ رو باز می‌کنه.
+    // Set country to allow channels 1-13
     // ------------------------------------------------------
     {
         wifi_country_t country = {};
-        strncpy(country.cc, "AZ", sizeof(country.cc)); // کد کشور با کانال ۱۳ مجاز
+        strncpy(country.cc, "AZ", sizeof(country.cc));
         country.schan = 1;
         country.nchan = 13;
         country.policy = WIFI_COUNTRY_POLICY_MANUAL;
         esp_wifi_set_country(&country);
     }
-
 
     Serial.println("[WiFi] Scanning networks...");
     int networksFound = WiFi.scanNetworks();
@@ -262,7 +248,6 @@ bool AppController::connectToWiFi()
 
     WiFi.scanDelete();
 
-
     Serial.println();
     Serial.print("[WiFi] Connecting to ");
     Serial.println(WIFI_SSID);
@@ -325,11 +310,12 @@ static const char* wifiStatusToString(wl_status_t status)
     }
 }
 
+
 void AppController::initCloudManager()
 {
     Serial.println("[CLOUD] Initializing CloudManager...");
     cloudManager = new CloudManager();
-    cloudManager->setApiBaseUrl("http://192.168.88.177:3000");
+    cloudManager->setApiBaseUrl("http://192.168.88.171:3000");
     cloudManager->onBinaryFrame([this](
         const MyBusHeader& hdr,
         const std::vector<uint8_t>& payload
@@ -894,8 +880,7 @@ String AppController::getRegistryValue(uint16_t regAddr)
 
 
 // ============================================================
-// ✅ rawPayloadToRegValString — تبدیل بایت خام به String
-// (فقط برای رجیسترهای لوکال که API قدیمی String می‌گیرند)
+// rawPayloadToRegValString — تبدیل بایت خام به String
 // ============================================================
 
 String AppController::rawPayloadToRegValString(
@@ -903,7 +888,6 @@ String AppController::rawPayloadToRegValString(
     const uint8_t* data,
     size_t len)
 {
-    // نوع داده را از خود آدرس استخراج کن
     const MyBusDataType dataType =
         static_cast<MyBusDataType>((regAddr >> 8) & 0x0F);
 
@@ -969,18 +953,6 @@ String AppController::rawPayloadToRegValString(
 }
 
 
-// ============================================================
-// ✅ onBinaryFrameReceived — پردازش فریم mYBUS باینری از WS
-//
-// ⚠️ این تابع از طریق callback از CloudWebSocketServer صدا زده
-// می‌شود. کانال WS کاملاً باینری است - هیچ JsonDocument اینجا
-// وجود ندارد.
-//
-// برای رجیسترهای لوکال، بایت خام را به String تبدیل می‌کنیم
-// (چون writeAudioRegistry/writeLocalRegistry هنوز String می‌گیرند)
-// و از همان مسیر encodeRegValueString استفاده می‌کنیم.
-// ============================================================
-
 void AppController::onBinaryFrameReceived(
     const MyBusHeader& hdr,
     const std::vector<uint8_t>& payload)
@@ -991,7 +963,6 @@ void AppController::onBinaryFrameReceived(
     switch (hdr.command) {
 
         case mybus_proto::COMMAND_WRITE_REGISTRY: {
-            // payload: [AddrLow][AddrHigh][RawValueBytes...]
             if (payload.size() < 3) {
                 Serial.println("[BIN] ❌ WRITE payload too short");
                 return;
@@ -1007,7 +978,6 @@ void AppController::onBinaryFrameReceived(
             Serial.printf("[BIN] WRITE 0x%04X = '%s'\n",
                           regAddr, regVal.c_str());
 
-            // audio / curtain / local
             bool handledLocally =
                 writeAudioRegistry(regAddr, regVal) ||
                 handleCurtainRegistryWrite(regAddr, regVal) ||
@@ -1022,7 +992,6 @@ void AppController::onBinaryFrameReceived(
         }
 
         case mybus_proto::COMMAND_READ_REGISTRY:
-            // پاسخ READ مستقیماً توسط CloudWebSocketServer فرستاده شد
             Serial.printf("[BIN] READ_REGISTRY 0x%04X (handled by WS server)\n",
                           payload.size() >= 2
                               ? (payload[0] | (payload[1] << 8))
@@ -1034,7 +1003,6 @@ void AppController::onBinaryFrameReceived(
         case mybus_proto::COMMAND_WS_SITE_INFO:
         case mybus_proto::COMMAND_WS_WELCOME:
         case mybus_proto::COMMAND_WS_ERROR:
-            // این‌ها مستقیماً توسط CloudWebSocketServer پردازش می‌شوند
             break;
 
         default:

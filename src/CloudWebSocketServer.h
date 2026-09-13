@@ -107,6 +107,13 @@ private:
         size_t payloadLen
     );
 
+
+    String getContentType(const String& path);
+
+    bool handleFileRead(AsyncWebServerRequest* request, String path);
+
+    void handleNotFound(AsyncWebServerRequest* request);
+
     uint32_t requestNumber_ = 0;
     uint32_t nextRequestNumber();
 

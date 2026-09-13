@@ -4,7 +4,7 @@
 #include <WiFi.h>
 #include <esp_system.h>
 #include <vector>
-
+#include <LittleFS.h>  
 #include "mybus_frame.h"
 #include "mybus_registry.h"
 #include "mybus_protocol_constants.h"
@@ -13,11 +13,6 @@
 #include "RegisterRawValue.h"
 
 namespace {
-
-// ------------------------------------------------------------
-// ByteWriter: TLV باینری ساده، فقط برای payloadهای WS-only
-// (STATUS/USERS_LIST/SITE_INFO/WELCOME).
-// ------------------------------------------------------------
 class ByteWriter {
 public:
     explicit ByteWriter(std::vector<uint8_t>& buf) : buf_(buf) {}
@@ -68,7 +63,7 @@ void hexStringToBytes(const String& hex, std::vector<uint8_t>& out) {
     }
 }
 
-} // namespace
+} 
 
 
 CloudWebSocketServer::CloudWebSocketServer(
@@ -132,7 +127,33 @@ void CloudWebSocketServer::start()
     static constexpr const char* FIRMWARE_VERSION = "2.0.0";
     static constexpr const char* PART_NUMBER      = "SEC-BLB56001";
 
-    // فقط endpoint دیباگ JSON-over-HTTP باقی می‌ماند
+    // ═══════════════════════════════════════════════════════
+    // ✅ Root endpoint: تفکیک mDNS از IP
+    // ═══════════════════════════════════════════════════════
+    server_->on("/", HTTP_GET, [this](AsyncWebServerRequest *request) {
+        String host = request->host();
+
+        Serial.printf("[HTTP] 🔍 GET / host='%s'\n", host.c_str());
+
+        // ✅ mDNS → فقط IP
+        if (host.indexOf("ecosmart") >= 0) {
+            Serial.println("[HTTP] → mDNS: returning IP");
+            request->send(200, "text/plain", WiFi.localIP().toString());
+            return;
+        }
+
+        // ✅ IP → صفحه HTML
+        Serial.println("[HTTP] → IP: serving index.html");
+        if (!handleFileRead(request, "/index.html")) {
+            Serial.println("[HTTP] ❌ index.html not found in LittleFS");
+            request->send(404, "text/plain",
+                "index.html not found. Run: pio run -t uploadfs");
+        }
+    });
+
+    // ═══════════════════════════════════════════════════════
+    // /info endpoint: JSON کامل
+    // ═══════════════════════════════════════════════════════
     server_->on("/info", HTTP_GET, [this](AsyncWebServerRequest *request) {
         AsyncResponseStream *response =
             request->beginResponseStream("application/json");
@@ -161,11 +182,16 @@ void CloudWebSocketServer::start()
         request->send(response);
     });
 
+    server_->onNotFound([this](AsyncWebServerRequest* request) {
+        this->handleNotFound(request);
+    });
+
     server_->begin();
 
     Serial.println("[WS] WebSocket server started");
     Serial.println("[WS] Path: /ws (binary mYBUS control frames only)");
-    Serial.println("[WS] HTTP: GET /info (JSON, debug only)");
+    Serial.println("[WS] HTTP: GET /      (mDNS: IP, IP: index.html)");
+    Serial.println("[WS] HTTP: GET /info  (JSON: device info)");
 }
 
 void CloudWebSocketServer::loop()
@@ -373,9 +399,6 @@ void CloudWebSocketServer::handleBinaryMessage(void* arg, uint8_t* data, size_t 
 }
 
 
-// ============================================================
-// READ_REGISTRY
-// ============================================================
 void CloudWebSocketServer::handleReadRegistry(
     const MyBusHeader& hdr,
     const std::vector<uint8_t>& payload)
@@ -389,7 +412,6 @@ void CloudWebSocketServer::handleReadRegistry(
 
     Serial.printf("[WS] GET_REGISTRY: 0x%04X\n", regAddr);
 
-    // 1. رجیستر لوکال؟
     if (localReadCallback_) {
         RegisterRawValue localValue;
         if (localReadCallback_(regAddr, localValue)) {
@@ -407,7 +429,6 @@ void CloudWebSocketServer::handleReadRegistry(
         }
     }
 
-    // 2. غیرلوکال -> mYBUS
     Serial.printf("[WS] ℹ️ Registry 0x%04X not local, forwarding to mYBUS\n", regAddr);
 
     const uint8_t busDeviceId = 1;
@@ -432,9 +453,6 @@ void CloudWebSocketServer::handleReadRegistry(
 }
 
 
-// ============================================================
-// WRITE_REGISTRY  (✅ کاملاً باینری)
-// ============================================================
 void CloudWebSocketServer::handleWriteRegistryFrame(
     const MyBusHeader& hdr,
     const std::vector<uint8_t>& payload)
@@ -454,12 +472,10 @@ void CloudWebSocketServer::handleWriteRegistryFrame(
 
     const uint8_t busDeviceId = 1;
 
-    // ✅ باینری: مستقیم به AppController بدون JSON
     if (binaryFrameCallback_) {
         binaryFrameCallback_(hdr, payload);
     }
 
-    // ✅ رجیستر لوکال؟
     if (shouldSkipMybusWriteCallback_ && shouldSkipMybusWriteCallback_(regAddr)) {
         Serial.printf("[WS] ✅ Local register 0x%04X handled without mYBUS forwarding\n", regAddr);
         const uint8_t flags = (1U << MYBUS_FLAG_RSP_BIT);
@@ -468,7 +484,6 @@ void CloudWebSocketServer::handleWriteRegistryFrame(
         return;
     }
 
-    // ✅ غیرلوکال -> mYBUS باینری (بدون JSON)
     JsonDocument response;
     const bool sent = mybus_.sendRegistryFrame(
         regAddr, value, valueLen, /*isWrite=*/true, busDeviceId, nextRequestNumber(), &response);
@@ -488,10 +503,6 @@ void CloudWebSocketServer::handleWriteRegistryFrame(
     }
 }
 
-
-// ============================================================
-// STATUS
-// ============================================================
 void CloudWebSocketServer::handleGetStatus(uint16_t requestNumber)
 {
     std::vector<uint8_t> payload;
@@ -508,10 +519,6 @@ void CloudWebSocketServer::handleGetStatus(uint16_t requestNumber)
                       payload.data(), payload.size());
 }
 
-
-// ============================================================
-// USERS_LIST
-// ============================================================
 void CloudWebSocketServer::handleGetUsers(uint16_t requestNumber)
 {
     std::vector<UserInfo> users;
@@ -539,10 +546,6 @@ void CloudWebSocketServer::handleGetUsers(uint16_t requestNumber)
                       payload.data(), payload.size());
 }
 
-
-// ============================================================
-// SITE_INFO
-// ============================================================
 void CloudWebSocketServer::handleGetSiteInfo(uint16_t requestNumber)
 {
     SiteInfo info;
@@ -564,4 +567,61 @@ void CloudWebSocketServer::handleGetSiteInfo(uint16_t requestNumber)
     const uint8_t flags = (1U << MYBUS_FLAG_RSP_BIT);
     sendControlFrame(mybus_proto::COMMAND_WS_SITE_INFO, flags, requestNumber,
                       payload.data(), payload.size());
+}
+
+String CloudWebSocketServer::getContentType(const String& path)
+{
+    if (path.endsWith(".html") || path.endsWith(".htm")) return "text/html";
+    if (path.endsWith(".css")) return "text/css";
+    if (path.endsWith(".js")) return "application/javascript";
+    if (path.endsWith(".json")) return "application/json";
+    if (path.endsWith(".png")) return "image/png";
+    if (path.endsWith(".jpg") || path.endsWith(".jpeg")) return "image/jpeg";
+    if (path.endsWith(".gif")) return "image/gif";
+    if (path.endsWith(".ico")) return "image/x-icon";
+    if (path.endsWith(".svg")) return "image/svg+xml";
+    if (path.endsWith(".xml")) return "text/xml";
+    if (path.endsWith(".pdf")) return "application/pdf";
+    if (path.endsWith(".zip")) return "application/zip";
+    if (path.endsWith(".gz")) return "application/x-gzip";
+    return "text/plain";
+}
+
+bool CloudWebSocketServer::handleFileRead(AsyncWebServerRequest* request, String path)
+{
+    if (path.endsWith("/")) {
+        path += "index.html";
+    }
+
+    const String contentType = getContentType(path);
+
+    if (!LittleFS.exists(path)) {
+        return false;
+    }
+
+    request->send(LittleFS, path, contentType);
+    return true;
+}
+
+void CloudWebSocketServer::handleNotFound(AsyncWebServerRequest* request)
+{
+    Serial.printf("[HTTP] ⚠️ Not Found: %s %s\n",
+                  request->methodToString(),
+                  request->url().c_str());
+
+    if (request->method() == HTTP_GET && handleFileRead(request, request->url())) {
+        return;
+    }
+
+    AsyncResponseStream* response =
+        request->beginResponseStream("application/json");
+    response->setCode(404);
+
+    JsonDocument doc;
+    doc["error"] = "Not Found";
+    doc["path"] = request->url();
+    doc["method"] = request->methodToString();
+
+    serializeJson(doc, *response);
+    request->send(response);
 }
