@@ -246,7 +246,7 @@ bool AppController::connectToWiFi()
         Serial.print("[WiFi] 📶 IP: ");
         Serial.println(WiFi.localIP());
         Serial.printf("[WiFi] RSSI: %d dBm\n", WiFi.RSSI());
-        
+
         WiFi.setAutoReconnect(true);
         Serial.println("[WiFi] Auto-reconnect enabled");
         return true;
@@ -376,37 +376,53 @@ void AppController::initAudioHardware()
 
 void AppController::handleWiFiReconnect()
 {
-    if (WiFi.status() == WL_CONNECTED) {
-        if (wifiReconnectState_ == WifiReconnectState::RECONNECTING) {
-            Serial.println("[WiFi] Reconnected!");
-            wifiReconnectState_ = WifiReconnectState::IDLE;
-        }
-        return;
-    }
+    // ============================================================
+    // DISABLED: WiFi reconnect logic is currently disabled.
+    //
+    // The original implementation called WiFi.reconnect() every
+    // WIFI_RECONNECT_ATTEMPT_INTERVAL_MS while in RECONNECTING
+    // state, but this caused the ESP32 to repeatedly disconnect
+    // and reconnect even when the WiFi link was stable. The exact
+    // root cause is still under investigation.
+    //
+    // For now, the ESP32 relies on the Arduino core's built-in
+    // WiFi.setAutoReconnect(true) to handle reconnection at the
+    // SDK level, without any application-level retry loop.
+    //
+    // To re-enable, uncomment the original implementation below.
+    // ============================================================
 
-    const unsigned long now = millis();
-
-    if (wifiReconnectState_ == WifiReconnectState::IDLE) {
-        Serial.println("[WiFi] Connection lost. Reconnecting...");
-        WiFi.reconnect();
-        wifiReconnectState_ = WifiReconnectState::RECONNECTING;
-        wifiReconnectStartMs_ = now;
-        wifiLastAttemptMs_ = now;
-        return;
-    }
-
-    if (wifiReconnectState_ == WifiReconnectState::RECONNECTING) {
-        if (now - wifiLastAttemptMs_ >= WIFI_RECONNECT_ATTEMPT_INTERVAL_MS) {
-            Serial.println("[WiFi] Retrying reconnect...");
-            WiFi.reconnect();
-            wifiLastAttemptMs_ = now;
-        }
-
-        if (now - wifiReconnectStartMs_ >= WIFI_RECONNECT_TIMEOUT_MS) {
-            Serial.println("[WiFi] Reconnect timeout, will retry on next loop pass");
-            wifiReconnectState_ = WifiReconnectState::IDLE;
-        }
-    }
+    // if (WiFi.status() == WL_CONNECTED) {
+    //     if (wifiReconnectState_ == WifiReconnectState::RECONNECTING) {
+    //         Serial.println("[WiFi] Reconnected!");
+    //         wifiReconnectState_ = WifiReconnectState::IDLE;
+    //     }
+    //     return;
+    // }
+    //
+    // const unsigned long now = millis();
+    //
+    // if (wifiReconnectState_ == WifiReconnectState::IDLE) {
+    //     Serial.println("[WiFi] Connection lost. Reconnecting...");
+    //     WiFi.reconnect();
+    //     wifiReconnectState_ = WifiReconnectState::RECONNECTING;
+    //     wifiReconnectStartMs_ = now;
+    //     wifiLastAttemptMs_ = now;
+    //     return;
+    // }
+    //
+    // if (wifiReconnectState_ == WifiReconnectState::RECONNECTING) {
+    //     if (now - wifiLastAttemptMs_ >= WIFI_RECONNECT_ATTEMPT_INTERVAL_MS) {
+    //         Serial.println("[WiFi] Retrying reconnect...");
+    //         WiFi.reconnect();
+    //         wifiLastAttemptMs_ = now;
+    //     }
+    //
+    //     if (now - wifiReconnectStartMs_ >= WIFI_RECONNECT_TIMEOUT_MS) {
+    //         Serial.println("[WiFi] Reconnect timeout, will retry on next loop pass");
+    //         wifiReconnectState_ = WifiReconnectState::IDLE;
+    //     }
+    // }
 }
 
 

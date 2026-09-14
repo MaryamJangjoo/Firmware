@@ -9,8 +9,6 @@
 #include "mybus_registry.h"
 #include "mybus_protocol_constants.h"
 
-
-
 MybusTransport::MybusTransport(
     HttpTransport& transport,
     MybusSession& session)
@@ -19,14 +17,13 @@ MybusTransport::MybusTransport(
 {
 }
 
-
 bool MybusTransport::validateAddress(
     uint8_t deviceId,
     uint8_t zone) const
 {
     if (deviceId == 0 || deviceId == 255) {
         Serial.printf(
-            "[mYBUS] ❌ Invalid deviceId: %u\n",
+            "[mYBUS] Invalid deviceId: %u\n",
             deviceId
         );
 
@@ -35,7 +32,7 @@ bool MybusTransport::validateAddress(
 
     if (zone == 0 || zone == 255) {
         Serial.printf(
-            "[mYBUS] ❌ Invalid zone: %u\n",
+            "[mYBUS] Invalid zone: %u\n",
             zone
         );
 
@@ -44,7 +41,6 @@ bool MybusTransport::validateAddress(
 
     return true;
 }
-
 
 bool MybusTransport::sendMybusBinaryFrame(
     uint8_t sequence,
@@ -64,7 +60,7 @@ bool MybusTransport::sendMybusBinaryFrame(
 {
     if (payloadLen > MYBUS_MAX_PAYLOAD_SIZE) {
         Serial.printf(
-            "[mYBUS] ❌ Payload too large: %u\n",
+            "[mYBUS] Payload too large: %u\n",
             static_cast<unsigned>(payloadLen)
         );
 
@@ -73,7 +69,7 @@ bool MybusTransport::sendMybusBinaryFrame(
 
     if (!session_.isEstablished()) {
         Serial.println(
-            "[mYBUS] ❌ No secure session"
+            "[mYBUS] No secure session"
         );
 
         return false;
@@ -86,10 +82,8 @@ bool MybusTransport::sendMybusBinaryFrame(
         return false;
     }
 
-
     flags |=
         (1U << MYBUS_FLAG_SCU_BIT);
-
 
     MyBusHeader hdr;
 
@@ -107,7 +101,6 @@ bool MybusTransport::sendMybusBinaryFrame(
     hdr.compression      = compression;
     hdr.command          = command;
 
-
     const size_t maxFrameSize =
         MYBUS_HEADER_SIZE +
         MYBUS_MAX_PAYLOAD_SIZE +
@@ -121,7 +114,6 @@ bool MybusTransport::sendMybusBinaryFrame(
         maxFrameSize
     );
 
-
     const size_t plainLen =
         mybus_buildFrame(
             hdr,
@@ -133,13 +125,11 @@ bool MybusTransport::sendMybusBinaryFrame(
 
     if (plainLen == 0) {
         Serial.println(
-            "[mYBUS] ❌ Frame build failed"
+            "[mYBUS] Frame build failed"
         );
 
         return false;
     }
-
-
 
     Serial.printf(
         "[mYBUS] Plain frame (%u bytes): ",
@@ -153,8 +143,6 @@ bool MybusTransport::sendMybusBinaryFrame(
         )
     );
 
-
-
     uint8_t iv[MYBUS_AES_IV_SIZE] = {0};
     uint8_t tag[MYBUS_AES_TAG_SIZE] = {0};
 
@@ -167,7 +155,7 @@ bool MybusTransport::sendMybusBinaryFrame(
             tag)) {
 
         Serial.println(
-            "[mYBUS] ❌ Encryption failed"
+            "[mYBUS] Encryption failed"
         );
 
         return false;
@@ -194,7 +182,7 @@ bool MybusTransport::sendMybusBinaryFrame(
 
     if (wireLen == 0) {
         Serial.println(
-            "[mYBUS] ❌ Wire packing failed"
+            "[mYBUS] Wire packing failed"
         );
 
         return false;
@@ -231,7 +219,7 @@ bool MybusTransport::sendMybusBinaryFrame(
         }
 
         Serial.println(
-            "[mYBUS] 📡 Result: ❌ FAILED"
+            "[mYBUS] Result: FAILED"
         );
 
         return false;
@@ -248,7 +236,7 @@ bool MybusTransport::sendMybusBinaryFrame(
                 *outResponse)) {
 
             Serial.println(
-                "[mYBUS] ⚠️ Failed to decrypt/parse response"
+                "[mYBUS] Failed to decrypt/parse response"
             );
 
             outResponse->clear();
@@ -265,7 +253,7 @@ bool MybusTransport::sendMybusBinaryFrame(
     }
 
     Serial.println(
-        "[mYBUS] 📡 Result: ✅ SUCCESS"
+        "[mYBUS] Result: SUCCESS"
     );
 
     return true;
@@ -280,7 +268,7 @@ bool MybusTransport::decryptAndParseMybusResponse(
 {
     if (!session_.isEstablished()) {
         Serial.println(
-            "[mYBUS] ❌ No secure session"
+            "[mYBUS] No secure session"
         );
 
         return false;
@@ -295,7 +283,7 @@ bool MybusTransport::decryptAndParseMybusResponse(
         wireLen < minimumWireLen) {
 
         Serial.printf(
-            "[mYBUS] ❌ Response too short: %u\n",
+            "[mYBUS] Response too short: %u\n",
             static_cast<unsigned>(wireLen)
         );
 
@@ -319,7 +307,6 @@ bool MybusTransport::decryptAndParseMybusResponse(
         MYBUS_AES_IV_SIZE +
         cipherLen;
 
-
     std::vector<uint8_t> plainFrame(
         cipherLen
     );
@@ -333,7 +320,7 @@ bool MybusTransport::decryptAndParseMybusResponse(
             plainFrame.data())) {
 
         Serial.println(
-            "[mYBUS] ❌ Response GCM authentication failed"
+            "[mYBUS] Response GCM authentication failed"
         );
 
         return false;
@@ -370,17 +357,16 @@ bool MybusTransport::decryptAndParseMybusResponse(
             frameErr)) {
 
         Serial.printf(
-            "[mYBUS] ❌ Response frame invalid: %s\n",
+            "[mYBUS] Response frame invalid: %s\n",
             mybus_frameErrorToString(frameErr)
         );
 
         return false;
     }
 
-
     if ((hdr.flags & (1U << MYBUS_FLAG_RSP_BIT)) == 0) {
         Serial.println(
-            "[mYBUS] ❌ Response frame has no RSP flag"
+            "[mYBUS] Response frame has no RSP flag"
         );
 
         return false;
@@ -388,7 +374,7 @@ bool MybusTransport::decryptAndParseMybusResponse(
 
     if (hdr.interfaceId != session_.interfaceId()) {
         Serial.printf(
-            "[mYBUS] ❌ Response interface mismatch: %u\n",
+            "[mYBUS] Response interface mismatch: %u\n",
             hdr.interfaceId
         );
 
@@ -397,17 +383,16 @@ bool MybusTransport::decryptAndParseMybusResponse(
 
     if (hdr.zone != session_.zone()) {
         Serial.printf(
-            "[mYBUS] ❌ Response zone mismatch: %u\n",
+            "[mYBUS] Response zone mismatch: %u\n",
             hdr.zone
         );
 
         return false;
     }
 
-
     if (hdr.deviceId != expectedDeviceId) {
         Serial.printf(
-            "[mYBUS] ❌ Response deviceId mismatch: got %u, expected %u\n",
+            "[mYBUS] Response deviceId mismatch: got %u, expected %u\n",
             hdr.deviceId,
             expectedDeviceId
         );
@@ -417,7 +402,7 @@ bool MybusTransport::decryptAndParseMybusResponse(
 
     if (hdr.requestNumber != expectedRequestNumber) {
         Serial.printf(
-            "[mYBUS] ❌ Response requestNumber mismatch: got %u, expected %u\n",
+            "[mYBUS] Response requestNumber mismatch: got %u, expected %u\n",
             hdr.requestNumber,
             expectedRequestNumber
         );
@@ -478,7 +463,6 @@ bool MybusTransport::decryptAndParseMybusResponse(
 
     return true;
 }
-
 
 void MybusTransport::decodeRegistryResponseValue(
     JsonDocument& doc,
@@ -684,7 +668,7 @@ bool MybusTransport::sendRegistryFrame(
 {
     if (!session_.isEstablished()) {
         Serial.println(
-            "[mYBUS] ❌ No secure session"
+            "[mYBUS] No secure session"
         );
 
         return false;
@@ -694,7 +678,7 @@ bool MybusTransport::sendRegistryFrame(
         busDeviceId == 255) {
 
         Serial.printf(
-            "[mYBUS] ❌ Invalid busDeviceId: %u\n",
+            "[mYBUS] Invalid busDeviceId: %u\n",
             busDeviceId
         );
 
@@ -705,7 +689,7 @@ bool MybusTransport::sendRegistryFrame(
         MYBUS_MAX_PAYLOAD_SIZE - 2) {
 
         Serial.printf(
-            "[mYBUS] ❌ Registry value too large: %u\n",
+            "[mYBUS] Registry value too large: %u\n",
             static_cast<unsigned>(valueLen)
         );
 
@@ -714,7 +698,7 @@ bool MybusTransport::sendRegistryFrame(
 
     if (isWrite && valueLen == 0) {
         Serial.println(
-            "[mYBUS] ❌ isWrite=true اما valueLen صفر است"
+            "[mYBUS] isWrite=true but valueLen is zero"
         );
 
         return false;
@@ -722,7 +706,7 @@ bool MybusTransport::sendRegistryFrame(
 
     if (!isWrite && valueLen != 0) {
         Serial.println(
-            "[mYBUS] ❌ isWrite=false اما valueLen غیرصفر است (Read نباید Value داشته باشد)"
+            "[mYBUS] isWrite=false but valueLen is non-zero (Read must not carry a value)"
         );
 
         return false;
@@ -761,6 +745,9 @@ bool MybusTransport::sendRegistryFrame(
     flags |=
         (1U << MYBUS_FLAG_SCU_BIT);
 
+    const uint8_t command =
+        isWrite ? mybus_proto::COMMAND_WRITE_REGISTRY
+                : mybus_proto::COMMAND_READ_REGISTRY;
 
     const bool ok =
         sendMybusBinaryFrame(
@@ -776,7 +763,7 @@ bool MybusTransport::sendRegistryFrame(
             flags,
             mybus_proto::SECURITY_ENCRYPTED,
             mybus_proto::COMPRESSION_NONE,
-            mybus_proto::COMMAND_REGISTRY,
+            command,
             payload.data(),
             payload.size(),
             outResponse
@@ -801,7 +788,7 @@ bool MybusTransport::sendMybusData(
 {
     if (!session_.isEstablished()) {
         Serial.println(
-            "[mYBUS] ❌ No secure session"
+            "[mYBUS] No secure session"
         );
 
         return false;
@@ -820,7 +807,7 @@ bool MybusTransport::sendMybusData(
         busDeviceId == 255) {
 
         Serial.println(
-            "[mYBUS] ❌ Invalid DeviceId"
+            "[mYBUS] Invalid DeviceId"
         );
 
         return false;
@@ -852,7 +839,7 @@ bool MybusTransport::sendMybusData(
                      *endPtr != '\0')) {
 
                     Serial.printf(
-                        "[mYBUS] ❌ Invalid float: %s\n",
+                        "[mYBUS] Invalid float: %s\n",
                         regVal.c_str()
                     );
 
@@ -886,7 +873,7 @@ bool MybusTransport::sendMybusData(
                      *endPtr != '\0')) {
 
                     Serial.printf(
-                        "[mYBUS] ❌ Invalid uint32: %s\n",
+                        "[mYBUS] Invalid uint32: %s\n",
                         regVal.c_str()
                     );
 
@@ -923,7 +910,7 @@ bool MybusTransport::sendMybusData(
                      *endPtr != '\0')) {
 
                     Serial.printf(
-                        "[mYBUS] ❌ Invalid int32: %s\n",
+                        "[mYBUS] Invalid int32: %s\n",
                         regVal.c_str()
                     );
 
@@ -962,7 +949,7 @@ bool MybusTransport::sendMybusData(
                     num > 0xFFFFL) {
 
                     Serial.printf(
-                        "[mYBUS] ❌ Invalid uint16: %s\n",
+                        "[mYBUS] Invalid uint16: %s\n",
                         regVal.c_str()
                     );
 
@@ -1001,7 +988,7 @@ bool MybusTransport::sendMybusData(
                     num > 32767L) {
 
                     Serial.printf(
-                        "[mYBUS] ❌ Invalid int16: %s\n",
+                        "[mYBUS] Invalid int16: %s\n",
                         regVal.c_str()
                     );
 
@@ -1040,7 +1027,7 @@ bool MybusTransport::sendMybusData(
                     num > 255) {
 
                     Serial.printf(
-                        "[mYBUS] ❌ Invalid uint8: %s\n",
+                        "[mYBUS] Invalid uint8: %s\n",
                         regVal.c_str()
                     );
 
@@ -1072,7 +1059,7 @@ bool MybusTransport::sendMybusData(
                     num > 127L) {
 
                     Serial.printf(
-                        "[mYBUS] ❌ Invalid int8: %s\n",
+                        "[mYBUS] Invalid int8: %s\n",
                         regVal.c_str()
                     );
 
@@ -1100,7 +1087,7 @@ bool MybusTransport::sendMybusData(
 
                 if (!isTrue && !isFalse) {
                     Serial.printf(
-                        "[mYBUS] ❌ Invalid bool: %s\n",
+                        "[mYBUS] Invalid bool: %s\n",
                         regVal.c_str()
                     );
 
@@ -1149,9 +1136,12 @@ bool MybusTransport::sendMybusData(
         outResponse
     );
 }
+
 // ============================================================
-// این دو تابع را به انتهای src/MybusTransport.cpp اضافه کن.
-// (mybus_frame.h و crypto.hpp قبلاً بالای همان فایل include شده‌اند)
+// Generic control-frame helpers used by CloudWebSocketServer.
+// These do not perform any HTTP I/O. They build or parse the
+// same encrypted wire format ([IV][CIPHERTEXT][TAG]) that the
+// mYBUS v2 protocol uses over the local WebSocket channel.
 // ============================================================
 
 bool MybusTransport::buildControlFrame(
@@ -1166,7 +1156,7 @@ bool MybusTransport::buildControlFrame(
 
     if (payloadLen > MYBUS_MAX_PAYLOAD_SIZE) {
         Serial.printf(
-            "[mYBUS-WS] ❌ Payload too large: %u\n",
+            "[mYBUS-WS] Payload too large: %u\n",
             static_cast<unsigned>(payloadLen)
         );
         return false;
@@ -1174,7 +1164,7 @@ bool MybusTransport::buildControlFrame(
 
     if (!session_.isEstablished()) {
         Serial.println(
-            "[mYBUS-WS] ❌ No secure session"
+            "[mYBUS-WS] No secure session"
         );
         return false;
     }
@@ -1187,7 +1177,7 @@ bool MybusTransport::buildControlFrame(
     hdr.sequence        = 0;
     hdr.interfaceId     = session_.interfaceId();
     hdr.zone            = session_.zone();
-    hdr.deviceId        = 0; // کانال کنترل محلی - آدرس یک دستگاه روی باس نیست
+    hdr.deviceId        = 0; // Control channel is not addressed to a bus device
     hdr.reserved        = 0;
     hdr.requestNumber   = requestNumber;
     hdr.qos             = mybus_proto::QOS_DEFAULT;
@@ -1207,7 +1197,7 @@ bool MybusTransport::buildControlFrame(
         hdr, payload, payloadLen, plainFrame.data(), plainFrame.size());
 
     if (plainLen == 0) {
-        Serial.println("[mYBUS-WS] ❌ Frame build failed");
+        Serial.println("[mYBUS-WS] Frame build failed");
         return false;
     }
 
@@ -1218,7 +1208,7 @@ bool MybusTransport::buildControlFrame(
             plainFrame.data(), plainLen,
             session_.sessionKey(),
             ciphertext.data(), iv, tag)) {
-        Serial.println("[mYBUS-WS] ❌ Encryption failed");
+        Serial.println("[mYBUS-WS] Encryption failed");
         return false;
     }
 
@@ -1232,7 +1222,7 @@ bool MybusTransport::buildControlFrame(
         outWire.data(), outWire.size());
 
     if (wireLen == 0) {
-        Serial.println("[mYBUS-WS] ❌ Wire packing failed");
+        Serial.println("[mYBUS-WS] Wire packing failed");
         outWire.clear();
         return false;
     }
@@ -1254,7 +1244,7 @@ bool MybusTransport::parseControlFrame(
     outError = MyBusFrameError::NONE;
 
     if (!session_.isEstablished()) {
-        Serial.println("[mYBUS-WS] ❌ No secure session");
+        Serial.println("[mYBUS-WS] No secure session");
         return false;
     }
 
@@ -1263,7 +1253,7 @@ bool MybusTransport::parseControlFrame(
 
     if (wireData == nullptr || wireLen < minimumWireLen) {
         Serial.printf(
-            "[mYBUS-WS] ❌ Frame too short: %u\n",
+            "[mYBUS-WS] Frame too short: %u\n",
             static_cast<unsigned>(wireLen)
         );
         return false;
@@ -1280,7 +1270,7 @@ bool MybusTransport::parseControlFrame(
             cipher, cipherLen,
             session_.sessionKey(),
             iv, tag, plainFrame.data())) {
-        Serial.println("[mYBUS-WS] ❌ GCM authentication failed");
+        Serial.println("[mYBUS-WS] GCM authentication failed");
         return false;
     }
 
@@ -1293,7 +1283,7 @@ bool MybusTransport::parseControlFrame(
             allowedCommands, allowedCommandsCount,
             outHdr, &payload, &payloadLen, outError)) {
         Serial.printf(
-            "[mYBUS-WS] ❌ Frame invalid: %s\n",
+            "[mYBUS-WS] Frame invalid: %s\n",
             mybus_frameErrorToString(outError)
         );
         return false;

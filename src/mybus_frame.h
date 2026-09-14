@@ -35,8 +35,8 @@
 
 // Commands
 
-#define MYBUS_CMD_READ_REGISTRY    0x02   // Read Registry
-#define MYBUS_CMD_WRITE_REGISTRY   0x03   // Write Registry
+#define MYBUS_CMD_READ_REGISTRY    0x00   // Read Registry
+#define MYBUS_CMD_WRITE_REGISTRY   0x01   // Write Registry
 
 // Flags
 
@@ -84,7 +84,6 @@ struct MyBusHeader {
     uint8_t  compression;      // offset 14
     uint8_t  command;          // offset 15
 };
-
 
 // CRC32
 uint32_t mybus_crc32(const uint8_t *data, size_t len);
@@ -187,17 +186,17 @@ bool mybus_parseRegistryPayload(
 // 7. چک Command (فقط در لیست مجاز)
 // ============================================================
 
-// لیست کدهای مجاز برای فریم‌های ورودی.
+// Allowed command codes for incoming frames.
 //
-// ⚠️ توجه: پیاده‌سازی فعلی MybusTransport::sendRegistryFrame همیشه کد
-// mybus_proto::COMMAND_REGISTRY (=2) را چه برای Read چه برای Write می‌فرستد؛
-// کدهای MYBUS_CMD_READ_REGISTRY(0x02)/MYBUS_CMD_WRITE_REGISTRY(0x03) در این
-// آرایه صرفاً برای مواقعی است که این تفکیک روی سیم واقعاً پیاده شود. تا آن
-// زمان، چون هر دو مقدار در عمل با 2 برابرند، این لیست همان یک کد را پوشش
-// می‌دهد.
+// Commands are now separated:
+//   READ_REGISTRY  = 0x00
+//   WRITE_REGISTRY = 0x01
+//
+// This means the receiver can distinguish read vs write without
+// inspecting the payload length.
 static constexpr uint8_t MYBUS_ALLOWED_COMMANDS[] = {
-    MYBUS_CMD_READ_REGISTRY,   // 0x02
-    MYBUS_CMD_WRITE_REGISTRY,  // 0x03
+    MYBUS_CMD_READ_REGISTRY,   // 0x00
+    MYBUS_CMD_WRITE_REGISTRY,  // 0x01
 };
 static constexpr size_t MYBUS_ALLOWED_COMMANDS_COUNT =
     sizeof(MYBUS_ALLOWED_COMMANDS) / sizeof(MYBUS_ALLOWED_COMMANDS[0]);
