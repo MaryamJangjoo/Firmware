@@ -18,6 +18,37 @@
 #include "RgbRegistryController.h"
 #include "CurtainRegistryController.h"
 
+// ============================================================
+// Fallback values for build-time configuration.
+//
+// The real values are injected via platformio.ini -> secrets.ini.
+// These fallbacks only exist so the code still compiles if the
+// build_flags are missing (for example when running a syntax
+// check without a secrets.ini file). They are intentionally
+// invalid so that a misconfigured build fails loudly at runtime
+// instead of silently connecting to the wrong network.
+// ============================================================
+
+#ifndef WIFI_SSID
+#define WIFI_SSID "CHANGE_ME_SSID"
+#endif
+
+#ifndef WIFI_PASSWORD
+#define WIFI_PASSWORD "CHANGE_ME_PASSWORD"
+#endif
+
+#ifndef API_BASE_URL
+#define API_BASE_URL "http://192.168.1.100:3000"
+#endif
+
+#ifndef OPERATOR_USERNAME
+#define OPERATOR_USERNAME "CHANGE_ME_USER"
+#endif
+
+#ifndef OPERATOR_PASSWORD
+#define OPERATOR_PASSWORD "CHANGE_ME_PASSWORD"
+#endif
+
 class AppController {
 public:
     AppController();
@@ -45,14 +76,11 @@ private:
     static constexpr int PIN_I2S_FAULT = 34;
     static constexpr int PIN_I2S_PDN   = 27;
 
-    const char* WIFI_SSID     = "megafaYakand8202";
-    const char* WIFI_PASSWORD = "megafaYak@kand*@)@";
-
     static constexpr uint8_t MYBUS_DEVICE_ID = 1;
     static constexpr uint8_t MYBUS_ZONE_ID   = 1;
 
-    // ⚠️⚠️⚠️ TODO حیاتی: باید از schematic تایید شود قبل از اتصال به
-    // موتور واقعی پرده - نگاه کن به CurtainRegistryController.
+    // TODO: must be confirmed from schematic before connecting
+    // to the real curtain motor.
     static constexpr size_t CURTAIN_OUTPUT_INDEX = 15;
 
     tas5805m amp;
@@ -64,8 +92,6 @@ private:
     RgbRegistryController     rgbController_;
     CurtainRegistryController curtainController_;
 
-    // ⚠️ Legacy: از وقتی پرده مسیر رجیستری اختصاصی خودش را گرفت،
-    // دیگر چیزی این دو متغیر را ست نمی‌کند - نگاه کن به handleLedState().
     bool ledState     = false;
     bool lastLedState = false;
 

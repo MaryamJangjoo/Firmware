@@ -67,16 +67,16 @@ void AppController::begin()
 
     Serial.println("[AUTH] Attempting to login...");
     bool loginSuccess = cloudManager->loginUser(
-        "tes29t_operator", "SecurePassword@20266", cloudManager->getDeviceId());
+        "OWNER_USERNAME", "OWNER_PASSWORD", cloudManager->getDeviceId());
 
     if (loginSuccess) {
-        Serial.println("[AUTH] ✅ Login successful!");
+        Serial.println("[AUTH]  Login successful!");
     } else {
-        Serial.println("[AUTH] ❌ Login failed, trying offline...");
+        Serial.println("[AUTH]  Login failed, trying offline...");
         if (cloudManager->loginOffline("tes29t_operator", "SecurePassword@20266")) {
-            Serial.println("[AUTH] ✅ Offline login successful!");
+            Serial.println("[AUTH]  Offline login successful!");
         } else {
-            Serial.println("[AUTH] ❌ Offline login failed!");
+            Serial.println("[AUTH]  Offline login failed!");
         }
     }
 
@@ -275,7 +275,7 @@ void AppController::initCloudManager()
 {
     Serial.println("[CLOUD] Initializing CloudManager...");
     cloudManager = new CloudManager();
-    cloudManager->setApiBaseUrl("http://192.168.88.171:3000");
+    cloudManager->setApiBaseUrl(API_BASE_URL);
     cloudManager->onBinaryFrame([this](
         const MyBusHeader& hdr,
         const std::vector<uint8_t>& payload

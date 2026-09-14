@@ -58,7 +58,7 @@ public:
 
 private:
 
-    String apiBaseUrl_ = "http://192.168.88.171:3000";
+    String apiBaseUrl_ = API_BASE_URL;
     String deviceId_;
     String jwtToken_;
     String siteId_;
