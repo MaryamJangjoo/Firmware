@@ -1,10 +1,7 @@
 #include "AppController.h"
 #include <esp_system.h>
-#include "ecosmart_registeries.h"
-#include "audio.hpp"
 #include "crypto.hpp"
 #include <WiFi.h>
-#include "mybus_value_codec.h"
 #include "mybus_protocol_constants.h"
 #include <esp_wifi.h>
 #include <ESPmDNS.h>
@@ -16,45 +13,13 @@
 AppController* AppController::s_instance = nullptr;
 
 
-namespace {
-
-Registery_t* findOutputRegistryEntry(uint16_t regAddr)
-{
-    for (size_t i = 0; i < OUTPUTS_NUMBER; i++) {
-        if (reg_module_output.state[i].address == regAddr) {
-            return &reg_module_output.state[i];
-        }
-    }
-    for (size_t i = 0; i < OUTPUTS_NUMBER; i++) {
-        if (reg_module_output.timer_permanent[i].address == regAddr) {
-            return &reg_module_output.timer_permanent[i];
-        }
-    }
-    for (size_t i = 0; i < OUTPUTS_NUMBER; i++) {
-        if (reg_module_output.timer_sleep[i].address == regAddr) {
-            return &reg_module_output.timer_sleep[i];
-        }
-    }
-    return nullptr;
-}
-
-
-Registery_t* findInputRegistryEntry(uint16_t regAddr)
-{
-    for (size_t i = 0; i < INPUTS_NUMBER; i++) {
-        if (reg_module_input.state[i].address == regAddr) {
-            return &reg_module_input.state[i];
-        }
-    }
-    return nullptr;
-}
-
-} // namespace
-
-
 AppController::AppController()
     : amp(&Wire),
-      bta("mYSpeaker")
+      bta("mYSpeaker"),
+      outputsController_(PIN_SR_LATCH, PIN_SR_CLOCK, PIN_SR_DATA),
+      audioController_(amp, bta),
+      rgbController_(leds, NUM_LEDS),
+      curtainController_(outputsController_, CURTAIN_OUTPUT_INDEX)
 {
     s_instance = this;
 }
@@ -64,9 +29,7 @@ void AppController::begin()
 {
     pinMode(PIN_LED_1, OUTPUT);
     pinMode(PIN_LED_2, OUTPUT);
-    pinMode(PIN_SR_CLOCK, OUTPUT);
-    pinMode(PIN_SR_DATA, OUTPUT);
-    pinMode(PIN_SR_LATCH, OUTPUT);
+    outputsController_.begin();
 
     Serial.begin(115200);
     delay(200);
@@ -170,9 +133,6 @@ bool AppController::connectToWiFi()
     WiFi.disconnect(true);
     delay(100);
 
-    // ------------------------------------------------------
-    // Set country to allow channels 1-13
-    // ------------------------------------------------------
     {
         wifi_country_t country = {};
         strncpy(country.cc, "AZ", sizeof(country.cc));
@@ -326,7 +286,10 @@ void AppController::initCloudManager()
     cloudManager->onLocalRegistryRead([this](uint16_t regAddr, RegisterRawValue& outValue) {
         RawRegisterValue rv;
 
-        if (!readAudioRegistry(regAddr, rv) && !readLocalRegistry(regAddr, rv)) {
+        if (!audioController_.read(regAddr, rv) &&
+            !rgbController_.read(regAddr, rv) &&
+            !curtainController_.read(regAddr, rv) &&
+            !outputsController_.readLocal(regAddr, rv)) {
             return false;
         }
 
@@ -354,8 +317,10 @@ void AppController::initCloudManager()
     });
 
     cloudManager->onShouldSkipMybusWrite([this](uint16_t regAddr) {
-        return findAudioRegistryEntry(regAddr) != nullptr
-            || findOutputRegistryEntry(regAddr) != nullptr;
+        return audioController_.findEntry(regAddr) != nullptr
+            || rgbController_.findEntry(regAddr) != nullptr
+            || curtainController_.findEntry(regAddr) != nullptr
+            || outputsController_.findOutputEntry(regAddr) != nullptr;
     });
 
     Serial.println("[CLOUD] CloudManager initialized successfully");
@@ -437,141 +402,17 @@ void AppController::handleWiFiReconnect()
 
 void AppController::handleLedState()
 {
+    // ⚠️ Legacy: چیزی دیگر ledState را ست نمی‌کند (پرده مسیر
+    // اختصاصی خودش را دارد). نقطه‌ی اتصال برای یک ورودی فیزیکی
+    // احتمالی در آینده.
     if (lastLedState != ledState) {
         lastLedState = ledState;
 
         for (size_t i = 0; i < OUTPUTS_NUMBER; i++) {
             outputs_object[i].value = ledState;
         }
-        applyOutputsToHardware();
+        outputsController_.applyToHardware();
     }
-}
-
-
-void AppController::setCurtainOn()
-{
-    digitalWrite(PIN_SR_LATCH, LOW);
-    shiftOut(PIN_SR_DATA, PIN_SR_CLOCK, LSBFIRST, 0xff);
-    shiftOut(PIN_SR_DATA, PIN_SR_CLOCK, LSBFIRST, 0xff);
-    digitalWrite(PIN_SR_LATCH, HIGH);
-}
-
-
-void AppController::setCurtainOff()
-{
-    digitalWrite(PIN_SR_LATCH, LOW);
-    shiftOut(PIN_SR_DATA, PIN_SR_CLOCK, LSBFIRST, 0);
-    shiftOut(PIN_SR_DATA, PIN_SR_CLOCK, LSBFIRST, 0);
-    digitalWrite(PIN_SR_LATCH, HIGH);
-}
-
-
-void AppController::applyOutputsToHardware()
-{
-    Serial.println("!!! 🔄 applyOutputsToHardware CALLED !!!");
-
-    uint8_t byteLow = 0;
-    uint8_t byteHigh = 0;
-
-    Serial.println("[OUTPUTS] Current states:");
-    for (size_t i = 0; i < OUTPUTS_NUMBER; i++) {
-        Serial.printf("  [%zu] = %d (addr=0x%04X)\n",
-                      i, outputs_object[i].value,
-                      reg_module_output.state[i].address);
-        if (outputs_object[i].value) {
-            if (i < 8) {
-                byteLow |= (1U << i);
-                Serial.printf("    → Setting bit %zu in byteLow\n", i);
-            } else {
-                byteHigh |= (1U << (i - 8));
-                Serial.printf("    → Setting bit %zu in byteHigh\n", i - 8);
-            }
-        }
-    }
-
-    Serial.printf("[OUTPUTS] Sending: byteHigh=0x%02X, byteLow=0x%02X\n", byteHigh, byteLow);
-
-    digitalWrite(PIN_SR_LATCH, LOW);
-    shiftOut(PIN_SR_DATA, PIN_SR_CLOCK, LSBFIRST, byteLow);
-    shiftOut(PIN_SR_DATA, PIN_SR_CLOCK, LSBFIRST, byteHigh);
-    digitalWrite(PIN_SR_LATCH, HIGH);
-
-    Serial.println("[OUTPUTS] ✅ Shift register updated");
-}
-
-
-// ============================================================
-// Local registry write (string-based, internal use)
-// ============================================================
-
-bool AppController::writeLocalRegistry(uint16_t regAddr, const String& regVal)
-{
-    Serial.printf("[REG] 🔍 writeLocalRegistry called: 0x%04X = '%s'\n",
-                  regAddr, regVal.c_str());
-
-    Registery_t* entry = findOutputRegistryEntry(regAddr);
-
-    if (entry == nullptr || entry->ref == nullptr) {
-        Serial.printf("[REG] ❌ Entry not found for 0x%04X\n", regAddr);
-        return false;
-    }
-
-    bool isState = false;
-    bool isTimer = false;
-    size_t index = 0;
-
-    for (size_t i = 0; i < OUTPUTS_NUMBER; i++) {
-        if (&reg_module_output.state[i] == entry) {
-            isState = true;
-            index = i;
-            break;
-        }
-        if (&reg_module_output.timer_permanent[i] == entry) {
-            isTimer = true;
-            index = i;
-            break;
-        }
-        if (&reg_module_output.timer_sleep[i] == entry) {
-            isTimer = true;
-            index = i;
-            break;
-        }
-    }
-
-    if (!isState && !isTimer) {
-        Serial.printf("[REG] ⏭️ Not an output/timer register\n");
-        return false;
-    }
-
-    if (entry->datatype > reg_datatype_float) {
-        Serial.printf("[REG] ❌ Unsupported datatype\n");
-        return false;
-    }
-
-    uint8_t buf[8];
-    size_t len = 0;
-
-    if (!encodeRegValueString(regVal, static_cast<MyBusDataType>(entry->datatype),
-                               buf, sizeof(buf), len)) {
-        Serial.printf("[REG] ❌ Failed to parse '%s'\n", regVal.c_str());
-        return false;
-    }
-
-    if (len != entry->size) {
-        Serial.printf("[REG] ❌ Size mismatch\n");
-        return false;
-    }
-
-    memcpy(entry->ref, buf, len);
-    Serial.printf("[REG] ✅ 0x%04X written\n", regAddr);
-
-    if (isState) {
-        applyOutputsToHardware();
-    } else {
-        Serial.printf("[REG] 📊 timer[%zu] stored (metadata only)\n", index);
-    }
-
-    return true;
 }
 
 
@@ -613,268 +454,6 @@ void AppController::btDataTrampoline(const uint8_t* data, uint32_t len)
 {
     if (s_instance != nullptr) {
         s_instance->onBtData(data, len);
-    }
-}
-
-
-// ============================================================
-// Audio registry
-// ============================================================
-
-Registery_t* AppController::findAudioRegistryEntry(uint16_t regAddr)
-{
-    Registery_t* candidates[] = {
-        &reg_module_audio.mode,
-        &reg_module_audio.control,
-        &reg_module_audio.sleep_timer,
-        &reg_module_audio.station,
-        &reg_module_audio.title,
-        &reg_module_audio.artist,
-        &reg_module_audio.volume,
-        &reg_module_audio.bass,
-        &reg_module_audio.treble,
-        &reg_module_audio.eq
-    };
-
-    for (auto* entry : candidates) {
-        if (entry->address == regAddr) {
-            return entry;
-        }
-    }
-    return nullptr;
-}
-
-
-bool AppController::readAudioRegistry(uint16_t regAddr, RawRegisterValue& outValue)
-{
-    Registery_t* entry = findAudioRegistryEntry(regAddr);
-    if (entry == nullptr || entry->ref == nullptr) {
-        return false;
-    }
-
-    outValue.datatype = entry->datatype;
-    outValue.isString = entry->isString;
-
-    if (entry->isString) {
-        outValue.stringValue = *static_cast<String*>(entry->ref);
-        outValue.byteLen = 0;
-        return true;
-    }
-
-    switch (entry->datatype) {
-        case reg_datatype_uint8:
-            outValue.bytes[0] = *static_cast<uint8_t*>(entry->ref);
-            outValue.byteLen = sizeof(uint8_t);
-            break;
-        case reg_datatype_uint16: {
-            uint16_t v = *static_cast<uint16_t*>(entry->ref);
-            memcpy(outValue.bytes, &v, sizeof(v));
-            outValue.byteLen = sizeof(v);
-            break;
-        }
-        default:
-            return false;
-    }
-
-    return true;
-}
-
-
-bool AppController::writeAudioRegistry(uint16_t regAddr, const String& regVal)
-{
-    Registery_t* entry = findAudioRegistryEntry(regAddr);
-    if (entry == nullptr || entry->ref == nullptr) {
-        return false;
-    }
-
-    if (!entry->writable) {
-        Serial.printf("[AUDIO] ❌ 0x%04X read-only\n", regAddr);
-        return false;
-    }
-
-    if (entry->isString) {
-        *static_cast<String*>(entry->ref) = regVal;
-    } else {
-        uint8_t buf[8];
-        size_t len = 0;
-
-        if (!encodeRegValueString(regVal, static_cast<MyBusDataType>(entry->datatype),
-                                   buf, sizeof(buf), len)) {
-            Serial.printf("[AUDIO] ❌ Parse failed: '%s'\n", regVal.c_str());
-            return false;
-        }
-
-        if (len != entry->size) {
-            Serial.printf("[AUDIO] ❌ Size mismatch at 0x%04X\n", regAddr);
-            return false;
-        }
-
-        memcpy(entry->ref, buf, len);
-    }
-
-    if (regAddr == REG_ADD_AUDIO_VOLUME) {
-        uint8_t vol = audio_object.volume;
-        if (vol > 124) vol = 124;
-        esp_err_t ret = tas5805m_set_volume_pct(vol);
-        Serial.printf("[AUDIO] Volume -> %u%% (%s)\n", vol, ret == ESP_OK ? "OK" : "FAIL");
-
-    } else if (regAddr == REG_ADD_AUDIO_CONTROL) {
-        switch (audio_object.control) {
-            case 1:
-                bta.reconnect();
-                Serial.println("[AUDIO] ▶️ Play / Reconnect");
-                break;
-            case 0:
-            case 2:
-                Serial.printf("[AUDIO] ⏸️ Command %u\n", audio_object.control);
-                break;
-            default:
-                Serial.printf("[AUDIO] ⚠️ Unknown control: %u\n", audio_object.control);
-                break;
-        }
-
-    } else if (regAddr == REG_ADD_AUDIO_BASS) {
-        Serial.printf("[AUDIO] Bass -> %u (not wired)\n", audio_object.bass);
-    } else if (regAddr == REG_ADD_AUDIO_TREBLE) {
-        Serial.printf("[AUDIO] Treble -> %u (not wired)\n", audio_object.treble);
-    } else if (regAddr == REG_ADD_AUDIO_EQ) {
-        Serial.printf("[AUDIO] EQ -> %u (not wired)\n", audio_object.eq);
-    } else if (regAddr == REG_ADD_AUDIO_MODE) {
-        Serial.printf("[AUDIO] Mode -> %u (not wired)\n", audio_object.mode);
-    } else if (regAddr == REG_ADD_AUDIO_STATION) {
-        Serial.printf("[AUDIO] Station -> %u (not wired)\n", audio_object.station);
-    } else if (regAddr == REG_ADD_AUDIO_SLEEP_TIMER) {
-        Serial.printf("[AUDIO] Sleep timer -> %u min (not wired)\n", audio_object.sleep_timer);
-    }
-
-    return true;
-}
-
-
-bool AppController::handleCurtainRegistryWrite(uint16_t regAddr, const String& regVal)
-{
-    if (regAddr == REG_ADD_CURTAIN_STATE) {
-        int state = regVal.toInt();
-        ledState = (state != 0);
-        Serial.printf("[CURTAIN] State -> %s\n", ledState ? "OPEN" : "CLOSE");
-        return true;
-    }
-
-    return false;
-}
-
-
-bool AppController::readLocalRegistry(uint16_t regAddr, RawRegisterValue& outValue)
-{
-    Registery_t* entry = findOutputRegistryEntry(regAddr);
-
-    if (entry == nullptr) {
-        entry = findInputRegistryEntry(regAddr);
-    }
-
-    if (entry == nullptr || entry->ref == nullptr) {
-        return false;
-    }
-
-    outValue.datatype = entry->datatype;
-    outValue.isString = false;
-
-    switch (entry->datatype) {
-        case reg_datatype_bit:
-            outValue.bytes[0] = (*static_cast<bool*>(entry->ref)) ? 1 : 0;
-            outValue.byteLen = 1;
-            break;
-        case reg_datatype_uint8:
-            outValue.bytes[0] = *static_cast<uint8_t*>(entry->ref);
-            outValue.byteLen = sizeof(uint8_t);
-            break;
-        case reg_datatype_uint16: {
-            uint16_t v = *static_cast<uint16_t*>(entry->ref);
-            memcpy(outValue.bytes, &v, sizeof(v));
-            outValue.byteLen = sizeof(v);
-            break;
-        }
-        case reg_datatype_uint32: {
-            uint32_t v = *static_cast<uint32_t*>(entry->ref);
-            memcpy(outValue.bytes, &v, sizeof(v));
-            outValue.byteLen = sizeof(v);
-            break;
-        }
-        case reg_datatype_int8: {
-            int8_t v = *static_cast<int8_t*>(entry->ref);
-            memcpy(outValue.bytes, &v, sizeof(v));
-            outValue.byteLen = sizeof(v);
-            break;
-        }
-        case reg_datatype_int16: {
-            int16_t v = *static_cast<int16_t*>(entry->ref);
-            memcpy(outValue.bytes, &v, sizeof(v));
-            outValue.byteLen = sizeof(v);
-            break;
-        }
-        case reg_datatype_int32: {
-            int32_t v = *static_cast<int32_t*>(entry->ref);
-            memcpy(outValue.bytes, &v, sizeof(v));
-            outValue.byteLen = sizeof(v);
-            break;
-        }
-        case reg_datatype_float: {
-            float v = *static_cast<float*>(entry->ref);
-            memcpy(outValue.bytes, &v, sizeof(v));
-            outValue.byteLen = sizeof(v);
-            break;
-        }
-        default:
-            return false;
-    }
-
-    return true;
-}
-
-
-String AppController::getRegistryValue(uint16_t regAddr)
-{
-    RawRegisterValue rv;
-
-    if (!readLocalRegistry(regAddr, rv)) {
-        return "";
-    }
-
-    if (rv.isString) {
-        return rv.stringValue;
-    }
-
-    switch (rv.datatype) {
-        case reg_datatype_bit:
-            return String(rv.bytes[0] != 0 ? 1 : 0);
-        case reg_datatype_uint8:
-            return String(rv.bytes[0]);
-        case reg_datatype_uint16: {
-            uint16_t v; memcpy(&v, rv.bytes, sizeof(v));
-            return String(v);
-        }
-        case reg_datatype_uint32: {
-            uint32_t v; memcpy(&v, rv.bytes, sizeof(v));
-            return String(v);
-        }
-        case reg_datatype_int8: {
-            int8_t v; memcpy(&v, rv.bytes, sizeof(v));
-            return String(v);
-        }
-        case reg_datatype_int16: {
-            int16_t v; memcpy(&v, rv.bytes, sizeof(v));
-            return String(v);
-        }
-        case reg_datatype_int32: {
-            int32_t v; memcpy(&v, rv.bytes, sizeof(v));
-            return String(v);
-        }
-        case reg_datatype_float: {
-            float v; memcpy(&v, rv.bytes, sizeof(v));
-            return String(v, 6);
-        }
-        default:
-            return "";
     }
 }
 
@@ -979,9 +558,10 @@ void AppController::onBinaryFrameReceived(
                           regAddr, regVal.c_str());
 
             bool handledLocally =
-                writeAudioRegistry(regAddr, regVal) ||
-                handleCurtainRegistryWrite(regAddr, regVal) ||
-                writeLocalRegistry(regAddr, regVal);
+                audioController_.write(regAddr, regVal) ||
+                rgbController_.write(regAddr, regVal) ||
+                curtainController_.write(regAddr, regVal) ||
+                outputsController_.writeOutput(regAddr, regVal);
 
             if (handledLocally) {
                 Serial.println("[BIN] ✅ Handled locally");

@@ -12,14 +12,11 @@
 #include "CloudManager.h"
 #include "ecosmart_registeries.h"
 #include "mybus_frame.h"
-
-struct RawRegisterValue {
-    Reg_DataType_t datatype = reg_datatype_uint8;
-    bool isString = false;
-    String stringValue;
-    uint8_t bytes[8] = {0};
-    size_t byteLen = 0;
-};
+#include "RawRegisterValue.h"
+#include "OutputsRegistryController.h"
+#include "AudioRegistryController.h"
+#include "RgbRegistryController.h"
+#include "CurtainRegistryController.h"
 
 class AppController {
 public:
@@ -54,10 +51,21 @@ private:
     static constexpr uint8_t MYBUS_DEVICE_ID = 1;
     static constexpr uint8_t MYBUS_ZONE_ID   = 1;
 
+    // ⚠️⚠️⚠️ TODO حیاتی: باید از schematic تایید شود قبل از اتصال به
+    // موتور واقعی پرده - نگاه کن به CurtainRegistryController.
+    static constexpr size_t CURTAIN_OUTPUT_INDEX = 15;
+
     tas5805m amp;
     btAudio  bta;
     CRGB     leds[NUM_LEDS];
 
+    OutputsRegistryController outputsController_;
+    AudioRegistryController   audioController_;
+    RgbRegistryController     rgbController_;
+    CurtainRegistryController curtainController_;
+
+    // ⚠️ Legacy: از وقتی پرده مسیر رجیستری اختصاصی خودش را گرفت،
+    // دیگر چیزی این دو متغیر را ست نمی‌کند - نگاه کن به handleLedState().
     bool ledState     = false;
     bool lastLedState = false;
 
@@ -83,24 +91,9 @@ private:
     void handleWiFiReconnect();
     void handleLedState();
 
-    void setCurtainOn();
-    void setCurtainOff();
-
     void visualizeAudio(const uint8_t* data, uint32_t len);
     void onBtData(const uint8_t* data, uint32_t len);
     static void btDataTrampoline(const uint8_t* data, uint32_t len);
-
-    Registery_t* findAudioRegistryEntry(uint16_t regAddr);
-
-    bool readAudioRegistry(uint16_t regAddr, RawRegisterValue& outValue);
-    bool writeAudioRegistry(uint16_t regAddr, const String& regVal);
-
-    bool handleCurtainRegistryWrite(uint16_t regAddr, const String& regVal);
-
-    String getRegistryValue(uint16_t regAddr);
-    bool readLocalRegistry(uint16_t regAddr, RawRegisterValue& outValue);
-    bool writeLocalRegistry(uint16_t regAddr, const String& regVal);
-    void applyOutputsToHardware();
 
     void onBinaryFrameReceived(
         const MyBusHeader& hdr,

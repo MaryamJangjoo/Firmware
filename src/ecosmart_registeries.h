@@ -4,6 +4,8 @@
 #include "mybus_registry.h"
 #include "inputs.hpp"
 #include "Outputs.hpp"
+#include "rgb.hpp"
+#include "curtain.hpp"
 
 typedef enum
 {
@@ -19,6 +21,7 @@ typedef enum
     reg_datatype_struct = 9,
     reg_datatype_json = 10
 } Reg_DataType_t;
+
 typedef struct
 {
     uint16_t address;
@@ -56,10 +59,25 @@ typedef struct
     Registery_t treble;
     Registery_t eq;
 } reg_module_audio_t;
+typedef struct
+{
+    Registery_t mode;
+    Registery_t hue;
+    Registery_t saturation;
+    Registery_t lightness;
+} reg_module_rgb_t;
+typedef struct
+{
+    Registery_t state;
+    Registery_t timer_permanent;
+} reg_module_curtain_t;
 
+   
 extern reg_module_input_t reg_module_input;
 extern reg_module_output_t reg_module_output;
 extern reg_module_audio_t reg_module_audio;
+extern reg_module_rgb_t reg_module_rgb;
+extern reg_module_curtain_t reg_module_curtain;
 
 // ---- Digital Inputs (Read-only) ----
 static constexpr uint16_t REG_ADD_INPUT_STATE[16] = {

@@ -57,7 +57,6 @@ constexpr uint8_t COMMAND_WS_SITE_INFO   = 22;
 constexpr uint8_t COMMAND_WS_WELCOME     = 23;
 constexpr uint8_t COMMAND_WS_ERROR       = 24;
 
-// دلایل خطا - در payload یک فریم COMMAND_WS_ERROR بایت دوم قرار می‌گیرند
 constexpr uint8_t REASON_TRANSPORT_ERROR = 1;
 constexpr uint8_t REASON_BACKEND_ERROR   = 2;
 constexpr uint8_t REASON_NOT_FOUND       = 3;

@@ -2,12 +2,15 @@
 #include "inputs.hpp"
 #include "Outputs.hpp"
 #include "audio.hpp"
+#include "rgb.hpp" 
+#include "curtain.hpp"
 
 
 reg_module_input_t reg_module_input;
 reg_module_output_t reg_module_output;
 reg_module_audio_t reg_module_audio;
-
+reg_module_rgb_t reg_module_rgb;
+reg_module_curtain_t reg_module_curtain;
 
 void ecosmart_registery_init()
 {
@@ -99,4 +102,42 @@ void ecosmart_registery_init()
         reg_module_audio.eq.size     = sizeof(audio_object.eq);
         reg_module_audio.eq.ref      = &audio_object.eq;
         reg_module_audio.eq.writable = true;
+        // ---- RGB LED Strips ----
+        reg_module_rgb.mode.address  = REG_ADD_RGB_MODE;
+        reg_module_rgb.mode.datatype = reg_datatype_uint8;
+        reg_module_rgb.mode.size     = sizeof(rgb_object.mode);
+        reg_module_rgb.mode.ref      = &rgb_object.mode;
+        reg_module_rgb.mode.writable = true;
+
+        reg_module_rgb.hue.address  = REG_ADD_RGB_HUE;
+        reg_module_rgb.hue.datatype = reg_datatype_uint16;
+        reg_module_rgb.hue.size     = sizeof(rgb_object.hue);
+        reg_module_rgb.hue.ref      = &rgb_object.hue;
+        reg_module_rgb.hue.writable = true;
+
+        reg_module_rgb.saturation.address  = REG_ADD_RGB_SATURATION;
+        reg_module_rgb.saturation.datatype = reg_datatype_uint8;
+        reg_module_rgb.saturation.size     = sizeof(rgb_object.saturation);
+        reg_module_rgb.saturation.ref      = &rgb_object.saturation;
+        reg_module_rgb.saturation.writable = true;
+
+        reg_module_rgb.lightness.address  = REG_ADD_RGB_LIGHTNESS;
+        reg_module_rgb.lightness.datatype = reg_datatype_uint8;
+        reg_module_rgb.lightness.size     = sizeof(rgb_object.lightness);
+        reg_module_rgb.lightness.ref      = &rgb_object.lightness;
+        reg_module_rgb.lightness.writable = true;
+        // ---- Motorized Curtain Control ----
+        reg_module_curtain.state.address  = REG_ADD_CURTAIN_STATE;
+        reg_module_curtain.state.datatype = reg_datatype_uint8;
+        reg_module_curtain.state.size     = sizeof(curtain_object.state);
+        reg_module_curtain.state.ref      = &curtain_object.state;
+        reg_module_curtain.state.writable = true;
+
+        reg_module_curtain.timer_permanent.address  = REG_ADD_CURTAIN_PERMANENT_TIMER;
+        reg_module_curtain.timer_permanent.datatype = reg_datatype_uint16;
+        reg_module_curtain.timer_permanent.size     = sizeof(curtain_object.timer_permanent);
+        reg_module_curtain.timer_permanent.ref      = &curtain_object.timer_permanent;
+        reg_module_curtain.timer_permanent.writable = true;
+
+        
     }   
