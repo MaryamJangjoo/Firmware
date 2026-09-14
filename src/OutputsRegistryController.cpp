@@ -115,45 +115,46 @@ bool OutputsRegistryController::readLocal(uint16_t regAddr, RawRegisterValue& ou
 
 bool OutputsRegistryController::writeOutput(uint16_t regAddr, const String& regVal)
 {
-    Serial.printf("[REG] 🔍 writeOutput called: 0x%04X = '%s'\n",
+    Serial.printf("[REG] writeOutput called: 0x%04X = '%s'\n",
                   regAddr, regVal.c_str());
 
     Registery_t* entry = findOutputEntry(regAddr);
 
     if (entry == nullptr || entry->ref == nullptr) {
-        Serial.printf("[REG] ❌ Entry not found for 0x%04X\n", regAddr);
+        Serial.printf("[REG] Entry not found for 0x%04X\n", regAddr);
         return false;
     }
 
-    bool isState = false;
-    bool isTimer = false;
+    // Classify the entry: state, timer_permanent, or timer_sleep.
+    enum class EntryKind { NONE, STATE, TIMER_PERMANENT, TIMER_SLEEP };
+    EntryKind kind = EntryKind::NONE;
     size_t index = 0;
 
     for (size_t i = 0; i < OUTPUTS_NUMBER; i++) {
         if (&reg_module_output.state[i] == entry) {
-            isState = true;
+            kind = EntryKind::STATE;
             index = i;
             break;
         }
         if (&reg_module_output.timer_permanent[i] == entry) {
-            isTimer = true;
+            kind = EntryKind::TIMER_PERMANENT;
             index = i;
             break;
         }
         if (&reg_module_output.timer_sleep[i] == entry) {
-            isTimer = true;
+            kind = EntryKind::TIMER_SLEEP;
             index = i;
             break;
         }
     }
 
-    if (!isState && !isTimer) {
-        Serial.printf("[REG] ⏭️ Not an output/timer register\n");
+    if (kind == EntryKind::NONE) {
+        Serial.printf("[REG] Not an output/timer register: 0x%04X\n", regAddr);
         return false;
     }
 
     if (entry->datatype > reg_datatype_float) {
-        Serial.printf("[REG] ❌ Unsupported datatype\n");
+        Serial.printf("[REG] Unsupported datatype for 0x%04X\n", regAddr);
         return false;
     }
 
@@ -162,22 +163,33 @@ bool OutputsRegistryController::writeOutput(uint16_t regAddr, const String& regV
 
     if (!encodeRegValueString(regVal, static_cast<MyBusDataType>(entry->datatype),
                                buf, sizeof(buf), len)) {
-        Serial.printf("[REG] ❌ Failed to parse '%s'\n", regVal.c_str());
+        Serial.printf("[REG] Failed to parse '%s'\n", regVal.c_str());
         return false;
     }
 
     if (len != entry->size) {
-        Serial.printf("[REG] ❌ Size mismatch\n");
+        Serial.printf("[REG] Size mismatch for 0x%04X\n", regAddr);
         return false;
     }
 
     memcpy(entry->ref, buf, len);
-    Serial.printf("[REG] ✅ 0x%04X written\n", regAddr);
+    Serial.printf("[REG] 0x%04X written\n", regAddr);
 
-    if (isState) {
-        applyToHardware();
-    } else {
-        Serial.printf("[REG] 📊 timer[%zu] stored (metadata only)\n", index);
+    switch (kind) {
+        case EntryKind::STATE:
+            applyToHardware();
+            break;
+
+        case EntryKind::TIMER_PERMANENT:
+            Serial.printf("[REG] timer_permanent[%zu] stored (metadata only)\n", index);
+            break;
+
+        case EntryKind::TIMER_SLEEP:
+            Serial.printf("[REG] timer_sleep[%zu] stored (metadata only)\n", index);
+            break;
+
+        default:
+            break;
     }
 
     return true;
