@@ -67,13 +67,14 @@ void AppController::begin()
 
     Serial.println("[AUTH] Attempting to login...");
     bool loginSuccess = cloudManager->loginUser(
-        "OWNER_USERNAME", "OWNER_PASSWORD", cloudManager->getDeviceId());
+        OWNER_USERNAME, OWNER_PASSWORD, cloudManager->getDeviceId());
 
     if (loginSuccess) {
         Serial.println("[AUTH]  Login successful!");
     } else {
         Serial.println("[AUTH]  Login failed, trying offline...");
-        if (cloudManager->loginOffline("tes29t_operator", "SecurePassword@20266")) {
+        if (cloudManager->loginOffline(OWNER_USERNAME, OWNER_PASSWORD)) {
+
             Serial.println("[AUTH]  Offline login successful!");
         } else {
             Serial.println("[AUTH]  Offline login failed!");
@@ -294,8 +295,9 @@ void AppController::initCloudManager()
         }
 
         outValue.stringValue = rv.stringValue;
-        outValue.byteLen = rv.byteLen;
-        memcpy(outValue.bytes, rv.bytes, sizeof(outValue.bytes));
+        outValue.byteLen = min(rv.byteLen, sizeof(outValue.bytes));
+        memset(outValue.bytes, 0, sizeof(outValue.bytes));
+        memcpy(outValue.bytes, rv.bytes, outValue.byteLen);
 
         if (rv.isString) {
             outValue.type = RegRawType::STRING;
