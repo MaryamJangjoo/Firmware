@@ -375,7 +375,7 @@ void AppController::handleWiFiReconnect()
 {
     if (WiFi.status() == WL_CONNECTED) {
         if (wifiReconnectState_ == WifiReconnectState::RECONNECTING) {
-            Serial.println("[WiFi] ✅ Reconnected!");
+            Serial.println("[WiFi] Reconnected!");
             wifiReconnectState_ = WifiReconnectState::IDLE;
         }
         return;
@@ -392,12 +392,17 @@ void AppController::handleWiFiReconnect()
         return;
     }
 
-    if (now - wifiLastAttemptMs_ >= WIFI_RECONNECT_ATTEMPT_INTERVAL_MS) {
-        wifiLastAttemptMs_ = now;
-    }
-    if (now - wifiReconnectStartMs_ >= WIFI_RECONNECT_TIMEOUT_MS) {
-        Serial.println("[WiFi] ❌ Reconnect timeout, will retry on next loop pass");
-        wifiReconnectState_ = WifiReconnectState::IDLE;
+    if (wifiReconnectState_ == WifiReconnectState::RECONNECTING) {
+        if (now - wifiLastAttemptMs_ >= WIFI_RECONNECT_ATTEMPT_INTERVAL_MS) {
+            Serial.println("[WiFi] Retrying reconnect...");
+            WiFi.reconnect();
+            wifiLastAttemptMs_ = now;
+        }
+
+        if (now - wifiReconnectStartMs_ >= WIFI_RECONNECT_TIMEOUT_MS) {
+            Serial.println("[WiFi] Reconnect timeout, will retry on next loop pass");
+            wifiReconnectState_ = WifiReconnectState::IDLE;
+        }
     }
 }
 
