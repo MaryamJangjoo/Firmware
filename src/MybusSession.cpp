@@ -9,6 +9,37 @@
 #include "mybus_protocol_constants.h"
 
 // ============================================================
+// Secure string wipe helper
+//
+// Arduino String does not expose a writable buffer, so we cannot
+// directly zero its heap storage. The safest approach is:
+//   1) Overwrite the current logical content via replace()
+//      with a fixed-length mask, then
+//   2) Reset the String to empty so the heap block is released.
+//
+// Note: the heap block may still contain stale bytes until the
+// allocator reuses it. For full protection, prefer storing
+// sensitive data in fixed-size uint8_t buffers and wiping those
+// with cryptoSecureZero().
+// ============================================================
+
+static void secureClearString(String& s)
+{
+    if (s.length() == 0) {
+        s = "";
+        return;
+    }
+
+    const size_t len = s.length();
+
+    for (size_t i = 0; i < len; ++i) {
+        s.setCharAt(i, '\0');
+    }
+
+    s = "";
+}
+
+// ============================================================
 // Constructor
 // ============================================================
 
@@ -33,6 +64,12 @@ MybusSession::MybusSession(
 MybusSession::~MybusSession()
 {
     clear();
+
+    secureClearString(devicePrivateKeyPem_);
+    secureClearString(devicePublicKeyPem_);
+    secureClearString(serverPublicKeyPem_);
+    secureClearString(handshakeNonce_);
+
     mbedtls_ecp_keypair_free(&deviceKeypair_);
 }
 
@@ -58,7 +95,7 @@ bool MybusSession::initializeDeviceKeypair()
 
     deviceKeypairInitialized_ = true;
 
-    devicePublicKeyPem_ = "";
+    secureClearString(devicePublicKeyPem_);
 
     if (!cryptoExportPublicKeyPem(
             deviceKeypair_,
@@ -73,7 +110,7 @@ bool MybusSession::initializeDeviceKeypair()
         return false;
     }
 
-    devicePrivateKeyPem_ = "";
+    secureClearString(devicePrivateKeyPem_);
 
     if (!cryptoExportPrivateKeyPem(
             deviceKeypair_,
@@ -141,10 +178,12 @@ String MybusSession::createNonce()
 
 bool MybusSession::generateHandshakeNonce()
 {
+    secureClearString(handshakeNonce_);
+
     handshakeNonce_ = createNonce();
 
     Serial.printf(
-        "[mYBUS] 🔑 Nonce generated: %s\n",
+        "[mYBUS] Nonce generated: %s\n",
         handshakeNonce_.c_str()
     );
 
@@ -194,13 +233,13 @@ String MybusSession::hmacHex(
 
 bool MybusSession::createChallengeHmac(String& hmacHexOut)
 {
-    hmacHexOut = "";
+    secureClearString(hmacHexOut);
 
     if (!sessionKeyValid_ ||
         handshakeNonce_.isEmpty()) {
 
         Serial.println(
-            "[mYBUS] ❌ Cannot create HMAC: session invalid or nonce empty"
+            "[mYBUS] Cannot create HMAC: session invalid or nonce empty"
         );
 
         return false;
@@ -225,12 +264,12 @@ bool MybusSession::createChallengeHmac(String& hmacHexOut)
 bool MybusSession::computeSessionKey()
 {
     Serial.println(
-        "[mYBUS] 🔐 Computing Session Key"
+        "[mYBUS] Computing Session Key"
     );
 
     if (serverPublicKeyPem_.isEmpty()) {
         Serial.println(
-            "[mYBUS] ❌ Missing server public key"
+            "[mYBUS] Missing server public key"
         );
         return false;
     }
@@ -239,7 +278,7 @@ bool MybusSession::computeSessionKey()
         devicePrivateKeyPem_.isEmpty()) {
 
         Serial.println(
-            "[mYBUS] ❌ Device keypair not initialized"
+            "[mYBUS] Device keypair not initialized"
         );
 
         return false;
@@ -254,7 +293,7 @@ bool MybusSession::computeSessionKey()
         sharedSecretHex.isEmpty()) {
 
         Serial.println(
-            "[mYBUS] ❌ ECDH shared secret failed"
+            "[mYBUS] ECDH shared secret failed"
         );
 
         return false;
@@ -272,12 +311,16 @@ bool MybusSession::computeSessionKey()
             sizeof(sharedSecret)
         );
 
+        secureClearString(sharedSecretHex);
+
         Serial.println(
-            "[mYBUS] ❌ Shared secret conversion failed"
+            "[mYBUS] Shared secret conversion failed"
         );
 
         return false;
     }
+
+    secureClearString(sharedSecretHex);
 
     static constexpr char kHkdfSalt[] =
         "mYBUS-v2-Salt";
@@ -319,7 +362,7 @@ bool MybusSession::computeSessionKey()
         );
 
         Serial.println(
-            "[mYBUS] ❌ HKDF derivation failed"
+            "[mYBUS] HKDF derivation failed"
         );
 
         return false;
@@ -328,7 +371,7 @@ bool MybusSession::computeSessionKey()
     sessionKeyValid_ = true;
 
     Serial.println(
-        "[mYBUS] ✅ Session key derived successfully"
+        "[mYBUS] Session key derived successfully"
     );
 
     return true;
@@ -342,14 +385,14 @@ bool MybusSession::authenticateHandshakeSession(
     uint32_t requestNumber)
 {
     Serial.println(
-        "[mYBUS] 🔑 PHASE 2: HMAC Verification Started"
+        "[mYBUS] PHASE 2: HMAC Verification Started"
     );
 
     String hmac;
 
     if (!createChallengeHmac(hmac)) {
         Serial.println(
-            "[mYBUS] ❌ Challenge HMAC creation failed"
+            "[mYBUS] Challenge HMAC creation failed"
         );
 
         return false;
@@ -396,6 +439,8 @@ bool MybusSession::authenticateHandshakeSession(
         body
     );
 
+    secureClearString(hmac);
+
     String response =
         transport_.sendRequest(
             "/devices/handshake",
@@ -404,9 +449,11 @@ bool MybusSession::authenticateHandshakeSession(
             true
         );
 
+    secureClearString(body);
+
     if (response.isEmpty()) {
         Serial.println(
-            "[mYBUS] ❌ Phase 2 failed - empty response"
+            "[mYBUS] Phase 2 failed - empty response"
         );
 
         return false;
@@ -418,12 +465,16 @@ bool MybusSession::authenticateHandshakeSession(
             responseDoc,
             response) != DeserializationError::Ok) {
 
+        secureClearString(response);
+
         Serial.println(
-            "[mYBUS] ❌ Phase 2 JSON parse error"
+            "[mYBUS] Phase 2 JSON parse error"
         );
 
         return false;
     }
+
+    secureClearString(response);
 
     const bool authenticated =
         responseDoc["isAuthenticated"].is<bool>() &&
@@ -431,14 +482,14 @@ bool MybusSession::authenticateHandshakeSession(
 
     if (!authenticated) {
         Serial.println(
-            "[mYBUS] ❌ Server rejected Phase 2"
+            "[mYBUS] Server rejected Phase 2"
         );
 
         return false;
     }
 
     Serial.println(
-        "[mYBUS] ✅ Phase 2 authenticated"
+        "[mYBUS] Phase 2 authenticated"
     );
 
     return true;
@@ -459,7 +510,7 @@ bool MybusSession::performHandshake(
         !initializeDeviceKeypair()) {
 
         Serial.println(
-            "[mYBUS] ❌ Device keypair unavailable"
+            "[mYBUS] Device keypair unavailable"
         );
 
         return false;
@@ -469,7 +520,7 @@ bool MybusSession::performHandshake(
 
     if (!generateHandshakeNonce()) {
         Serial.println(
-            "[mYBUS] ❌ Nonce generation failed"
+            "[mYBUS] Nonce generation failed"
         );
 
         return false;
@@ -532,9 +583,11 @@ bool MybusSession::performHandshake(
             true
         );
 
+    secureClearString(body);
+
     if (response.isEmpty()) {
         Serial.println(
-            "[mYBUS] ❌ Phase 1 failed - empty response"
+            "[mYBUS] Phase 1 failed - empty response"
         );
 
         clear();
@@ -547,13 +600,17 @@ bool MybusSession::performHandshake(
             responseDoc,
             response) != DeserializationError::Ok) {
 
+        secureClearString(response);
+
         Serial.println(
-            "[mYBUS] ❌ Phase 1 JSON parse error"
+            "[mYBUS] Phase 1 JSON parse error"
         );
 
         clear();
         return false;
     }
+
+    secureClearString(response);
 
     const char* serverKey =
         responseDoc["serverPublicKeyPem"];
@@ -562,18 +619,20 @@ bool MybusSession::performHandshake(
         strlen(serverKey) == 0) {
 
         Serial.println(
-            "[mYBUS] ❌ Missing/empty server public key"
+            "[mYBUS] Missing/empty server public key"
         );
 
         clear();
         return false;
     }
 
+    secureClearString(serverPublicKeyPem_);
+
     serverPublicKeyPem_ =
         String(serverKey);
 
     Serial.println(
-        "[mYBUS] ✅ Server public key received"
+        "[mYBUS] Server public key received"
     );
 
     // --------------------------------------------------------
@@ -582,7 +641,7 @@ bool MybusSession::performHandshake(
 
     if (!computeSessionKey()) {
         Serial.println(
-            "[mYBUS] ❌ Session key derivation failed"
+            "[mYBUS] Session key derivation failed"
         );
 
         clear();
@@ -597,7 +656,7 @@ bool MybusSession::performHandshake(
             requestNumber)) {
 
         Serial.println(
-            "[mYBUS] ❌ Phase 2 authentication failed"
+            "[mYBUS] Phase 2 authentication failed"
         );
 
         clear();
@@ -605,7 +664,7 @@ bool MybusSession::performHandshake(
     }
 
     Serial.println(
-        "[mYBUS] ✅ Secure session established"
+        "[mYBUS] Secure session established"
     );
 
     Serial.println(
@@ -628,6 +687,12 @@ void MybusSession::clear()
 
     sessionKeyValid_ = false;
 
-    serverPublicKeyPem_ = "";
-    handshakeNonce_ = "";
+    secureClearString(serverPublicKeyPem_);
+    secureClearString(handshakeNonce_);
+
+    // Note: devicePrivateKeyPem_ and devicePublicKeyPem_ are
+    // intentionally NOT cleared here. They belong to the device
+    // identity (persisted in NVS) and are needed to re-derive
+    // the session after a failure. They are wiped only in the
+    // destructor.
 }
