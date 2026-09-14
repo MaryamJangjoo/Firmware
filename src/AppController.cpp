@@ -246,6 +246,9 @@ bool AppController::connectToWiFi()
         Serial.print("[WiFi] 📶 IP: ");
         Serial.println(WiFi.localIP());
         Serial.printf("[WiFi] RSSI: %d dBm\n", WiFi.RSSI());
+        
+        WiFi.setAutoReconnect(true);
+        Serial.println("[WiFi] Auto-reconnect enabled");
         return true;
     }
 
