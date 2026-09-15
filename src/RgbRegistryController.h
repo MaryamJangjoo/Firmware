@@ -2,21 +2,23 @@
 #define RGB_REGISTRY_CONTROLLER_H
 
 #include <Arduino.h>
-#include <FastLED.h>
-#include "ecosmart_registeries.h"
-#include "RawRegisterValue.h"
+#include <vector>
 
-class RgbRegistryController {
+#include <FastLED.h>
+
+#include "RegistryControllerBase.h"
+
+class RgbRegistryController : public RegistryControllerBase {
 public:
     RgbRegistryController(CRGB* leds, size_t numLeds);
 
-    Registery_t* findEntry(uint16_t regAddr);
-    bool read(uint16_t regAddr, RawRegisterValue& outValue);
-    bool write(uint16_t regAddr, const String& regVal);
-
-    void applyToHardware();
+protected:
+    std::vector<Registery_t*> getCandidates() override;
+    void onWrite(uint16_t regAddr) override;
 
 private:
+    void applyToHardware();
+
     CRGB* leds_;
     size_t numLeds_;
 };

@@ -2,22 +2,24 @@
 #define AUDIO_REGISTRY_CONTROLLER_H
 
 #include <Arduino.h>
+#include <vector>
+
 #include <tas5805m.hpp>
 #include <btAudio.h>
-#include "ecosmart_registeries.h"
-#include "RawRegisterValue.h"
 
-class AudioRegistryController {
+#include "RegistryControllerBase.h"
+
+class AudioRegistryController : public RegistryControllerBase {
 public:
     AudioRegistryController(tas5805m& amp, btAudio& bta);
 
-    Registery_t* findEntry(uint16_t regAddr);
-    bool read(uint16_t regAddr, RawRegisterValue& outValue);
-    bool write(uint16_t regAddr, const String& regVal);
+protected:
+    std::vector<Registery_t*> getCandidates() override;
+    void onWrite(uint16_t regAddr) override;
 
 private:
     tas5805m& amp_;
     btAudio& bta_;
 };
 
-#endif
+#endif 

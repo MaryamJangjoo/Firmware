@@ -2,27 +2,24 @@
 #define CURTAIN_REGISTRY_CONTROLLER_H
 
 #include <Arduino.h>
-#include "ecosmart_registeries.h"
-#include "RawRegisterValue.h"
+#include <vector>
+
+#include "RegistryControllerBase.h"
 #include "OutputsRegistryController.h"
 
-// ⚠️ جایگزین setCurtainOn()/setCurtainOff() قدیمی که کل شیفت‌رجیستر
-// ۱۶‌بیتی را overwrite می‌کردند. حالا پرده یک بیت داخل outputs_object[]
-// است و از طریق OutputsRegistryController::applyToHardware() اعمال
-// می‌شود، نه با shiftOut مستقیم.
-class CurtainRegistryController {
+class CurtainRegistryController : public RegistryControllerBase {
 public:
-    // ⚠️⚠️⚠️ TODO حیاتی: outputIndex باید از schematic تایید شود قبل
-    // از اتصال به موتور واقعی پرده.
-    CurtainRegistryController(OutputsRegistryController& outputs, size_t outputIndex);
+    CurtainRegistryController(
+        OutputsRegistryController& outputs,
+        size_t outputIndex);
 
-    Registery_t* findEntry(uint16_t regAddr);
-    bool read(uint16_t regAddr, RawRegisterValue& outValue);
-    bool write(uint16_t regAddr, const String& regVal);
+protected:
+    std::vector<Registery_t*> getCandidates() override;
+    void onWrite(uint16_t regAddr) override;
 
 private:
     OutputsRegistryController& outputs_;
     size_t outputIndex_;
 };
 
-#endif
+#endif 

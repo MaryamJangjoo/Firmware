@@ -12,7 +12,6 @@
 
 AppController* AppController::s_instance = nullptr;
 
-
 AppController::AppController()
     : amp(&Wire),
       bta("mYSpeaker"),
@@ -21,9 +20,16 @@ AppController::AppController()
       rgbController_(leds, NUM_LEDS),
       curtainController_(outputsController_, CURTAIN_OUTPUT_INDEX)
 {
+    // Populate the base-class list after all controllers are constructed.
+    registryControllers_ = {
+        &audioController_,
+        &rgbController_,
+        &curtainController_,
+        &outputsController_,
+    };
+
     s_instance = this;
 }
-
 
 void AppController::begin()
 {
@@ -49,13 +55,11 @@ void AppController::begin()
         return;
     }
 
-    // ═══════════════════════════════════════════════════════
-    // ✅ mDNS: ecosmart.local
-    // ═══════════════════════════════════════════════════════
+    // mDNS: ecosmart.local
     if (!MDNS.begin("ecosmart")) {
-        Serial.println("[mDNS] ❌ Failed to start");
+        Serial.println("[mDNS] Failed to start");
     } else {
-        Serial.println("[mDNS] ✅ Started: http://ecosmart.local");
+        Serial.println("[mDNS] Started: http://ecosmart.local");
         MDNS.addService("http", "tcp", 80);
         MDNS.addService("ws", "tcp", 80);
         MDNS.addServiceTxt("http", "tcp", "device", "EcoSmart");
@@ -70,26 +74,25 @@ void AppController::begin()
         OWNER_USERNAME, OWNER_PASSWORD, cloudManager->getDeviceId());
 
     if (loginSuccess) {
-        Serial.println("[AUTH]  Login successful!");
+        Serial.println("[AUTH] Login successful!");
     } else {
-        Serial.println("[AUTH]  Login failed, trying offline...");
+        Serial.println("[AUTH] Login failed, trying offline...");
         if (cloudManager->loginOffline(OWNER_USERNAME, OWNER_PASSWORD)) {
-
-            Serial.println("[AUTH]  Offline login successful!");
+            Serial.println("[AUTH] Offline login successful!");
         } else {
-            Serial.println("[AUTH]  Offline login failed!");
+            Serial.println("[AUTH] Offline login failed!");
         }
     }
 
     if (cloudManager->isLoggedIn()) {
         if (cloudManager->isSecureSessionEstablished()) {
-            Serial.println("[mYBUS] ✅ Using restored session from NVS, skipping handshake");
+            Serial.println("[mYBUS] Using restored session from NVS, skipping handshake");
         } else {
             Serial.println("[mYBUS] Starting handshake...");
             if (cloudManager->performHandshake()) {
-                Serial.println("[mYBUS] ✅ Handshake successful!");
+                Serial.println("[mYBUS] Handshake successful!");
             } else {
-                Serial.println("[mYBUS] ❌ Handshake failed!");
+                Serial.println("[mYBUS] Handshake failed!");
             }
         }
     }
@@ -101,11 +104,10 @@ void AppController::begin()
 
     Serial.println();
     Serial.println("========================================");
-    Serial.println("✅ ESP32 Ready! (Binary WS mode)");
+    Serial.println("ESP32 Ready! (Binary WS mode)");
     Serial.println("========================================");
     Serial.println();
 }
-
 
 void AppController::handle()
 {
@@ -116,7 +118,6 @@ void AppController::handle()
     handleWiFiReconnect();
     handleLedState();
 }
-
 
 // ============================================================
 // WiFi Connection (improved with scan + country)
@@ -150,7 +151,7 @@ bool AppController::connectToWiFi()
     bool targetIsOpen = false;
 
     if (networksFound == 0) {
-        Serial.println("[WiFi] ⚠️ No networks found at all (radio issue?)");
+        Serial.println("[WiFi] No networks found at all (radio issue?)");
     } else {
         Serial.printf("[WiFi] Found %d networks:\n", networksFound);
 
@@ -181,13 +182,13 @@ bool AppController::connectToWiFi()
                 targetIsOpen = (enc == WIFI_AUTH_OPEN);
 
                 Serial.printf(
-                    "[WiFi] ✅ Target SSID found (RSSI=%d, Enc=%s)\n",
+                    "[WiFi] Target SSID found (RSSI=%d, Enc=%s)\n",
                     rssi, encStr
                 );
 
                 if (enc == WIFI_AUTH_WPA3_PSK) {
                     Serial.println(
-                        "[WiFi] ⚠️ Network is WPA3-only - ESP32 may fail to connect. "
+                        "[WiFi] Network is WPA3-only - ESP32 may fail to connect. "
                         "Try switching router to WPA2-PSK (AES)."
                     );
                 }
@@ -196,7 +197,7 @@ bool AppController::connectToWiFi()
 
         if (!targetFoundOn24GHz) {
             Serial.printf(
-                "[WiFi] ❌ Target SSID '%s' was NOT found in scan.\n",
+                "[WiFi] Target SSID '%s' was NOT found in scan.\n",
                 WIFI_SSID
             );
             Serial.println(
@@ -215,7 +216,7 @@ bool AppController::connectToWiFi()
 
     if (targetIsOpen) {
         Serial.println(
-            "[WiFi] ℹ️ Target network scanned as OPEN - connecting without password"
+            "[WiFi] Target network scanned as OPEN - connecting without password"
         );
         WiFi.begin(WIFI_SSID);
     } else {
@@ -242,18 +243,21 @@ bool AppController::connectToWiFi()
     Serial.println();
 
     if (WiFi.status() == WL_CONNECTED) {
-        Serial.println("[WiFi] ✅ Connected!");
-        Serial.print("[WiFi] 📶 IP: ");
+        Serial.println("[WiFi] Connected!");
+        Serial.print("[WiFi] IP: ");
         Serial.println(WiFi.localIP());
         Serial.printf("[WiFi] RSSI: %d dBm\n", WiFi.RSSI());
 
+        // NOTE: Do NOT call WiFi.setSleep(false) here. It breaks WiFi+BT
+        // coexistence and causes abort() in coex_core_enable when
+        // btAudio::begin() runs.
         WiFi.setAutoReconnect(true);
         Serial.println("[WiFi] Auto-reconnect enabled");
         return true;
     }
 
     Serial.printf(
-        "[WiFi] ❌ Connection failed! Final status=%d (%s)\n",
+        "[WiFi] Connection failed! Final status=%d (%s)\n",
         WiFi.status(), wifiStatusToString(WiFi.status())
     );
 
@@ -274,12 +278,12 @@ static const char* wifiStatusToString(wl_status_t status)
     }
 }
 
-
 void AppController::initCloudManager()
 {
     Serial.println("[CLOUD] Initializing CloudManager...");
     cloudManager = new CloudManager();
     cloudManager->setApiBaseUrl(API_BASE_URL);
+
     cloudManager->onBinaryFrame([this](
         const MyBusHeader& hdr,
         const std::vector<uint8_t>& payload
@@ -287,18 +291,39 @@ void AppController::initCloudManager()
         onBinaryFrameReceived(hdr, payload);
     });
 
-    cloudManager->onLocalRegistryRead([this](uint16_t regAddr, RegisterRawValue& outValue) {
+    cloudManager->onLocalRegistryRead([this](
+        uint16_t regAddr,
+        RegisterRawValue& outValue
+    ) {
         RawRegisterValue rv;
 
-        if (!audioController_.read(regAddr, rv) &&
-            !rgbController_.read(regAddr, rv) &&
-            !curtainController_.read(regAddr, rv) &&
-            !outputsController_.readLocal(regAddr, rv)) {
+        // Try each registry controller in order until one handles
+        // the address.
+        bool handled = false;
+        for (auto* ctrl : registryControllers_) {
+            if (ctrl->read(regAddr, rv)) {
+                handled = true;
+                break;
+            }
+        }
+
+        // Fall back to the outputs controller for input registers,
+        // which are not part of the base-class candidate list.
+        if (!handled) {
+            handled = outputsController_.readLocal(regAddr, rv);
+        }
+
+        if (!handled) {
             return false;
         }
 
         outValue.stringValue = rv.stringValue;
+
+        // Clamp the copied length to the destination buffer size to
+        // avoid reading past the source array and to avoid leaving
+        // stale bytes in the destination when byteLen < sizeof(bytes).
         outValue.byteLen = min(rv.byteLen, sizeof(outValue.bytes));
+
         memset(outValue.bytes, 0, sizeof(outValue.bytes));
         memcpy(outValue.bytes, rv.bytes, outValue.byteLen);
 
@@ -322,15 +347,16 @@ void AppController::initCloudManager()
     });
 
     cloudManager->onShouldSkipMybusWrite([this](uint16_t regAddr) {
-        return audioController_.findEntry(regAddr) != nullptr
-            || rgbController_.findEntry(regAddr) != nullptr
-            || curtainController_.findEntry(regAddr) != nullptr
-            || outputsController_.findOutputEntry(regAddr) != nullptr;
+        for (auto* ctrl : registryControllers_) {
+            if (ctrl->findEntry(regAddr) != nullptr) {
+                return true;
+            }
+        }
+        return outputsController_.findOutputEntry(regAddr) != nullptr;
     });
 
     Serial.println("[CLOUD] CloudManager initialized successfully");
 }
-
 
 void AppController::configureMybusAddress()
 {
@@ -346,7 +372,6 @@ void AppController::configureMybusAddress()
         cloudManager->setMybusZoneId(MYBUS_ZONE_ID);
     }
 }
-
 
 void AppController::initAudioHardware()
 {
@@ -372,7 +397,6 @@ void AppController::initAudioHardware()
     bta.volume(1.0);
     bta.setSinkCallback(&AppController::btDataTrampoline);
 }
-
 
 void AppController::handleWiFiReconnect()
 {
@@ -425,12 +449,11 @@ void AppController::handleWiFiReconnect()
     // }
 }
 
-
 void AppController::handleLedState()
 {
-    // ⚠️ Legacy: چیزی دیگر ledState را ست نمی‌کند (پرده مسیر
-    // اختصاصی خودش را دارد). نقطه‌ی اتصال برای یک ورودی فیزیکی
-    // احتمالی در آینده.
+    // Legacy: nothing sets ledState anymore (the curtain has its own
+    // dedicated register path). This is kept as a hook for a possible
+    // future physical input.
     if (lastLedState != ledState) {
         lastLedState = ledState;
 
@@ -440,7 +463,6 @@ void AppController::handleLedState()
         outputsController_.applyToHardware();
     }
 }
-
 
 // ============================================================
 // Audio visualization
@@ -467,14 +489,12 @@ void AppController::visualizeAudio(const uint8_t* data, uint32_t len)
     FastLED.show();
 }
 
-
 void AppController::onBtData(const uint8_t* data, uint32_t len)
 {
     size_t written;
     i2s_write(I2S_NUM_0, data, len, &written, portMAX_DELAY);
     visualizeAudio(data, len);
 }
-
 
 void AppController::btDataTrampoline(const uint8_t* data, uint32_t len)
 {
@@ -483,9 +503,8 @@ void AppController::btDataTrampoline(const uint8_t* data, uint32_t len)
     }
 }
 
-
 // ============================================================
-// rawPayloadToRegValString — تبدیل بایت خام به String
+// rawPayloadToRegValString — convert raw bytes to String
 // ============================================================
 
 String AppController::rawPayloadToRegValString(
@@ -557,7 +576,6 @@ String AppController::rawPayloadToRegValString(
     }
 }
 
-
 void AppController::onBinaryFrameReceived(
     const MyBusHeader& hdr,
     const std::vector<uint8_t>& payload)
@@ -569,7 +587,7 @@ void AppController::onBinaryFrameReceived(
 
         case mybus_proto::COMMAND_WRITE_REGISTRY: {
             if (payload.size() < 3) {
-                Serial.println("[BIN] ❌ WRITE payload too short");
+                Serial.println("[BIN] WRITE payload too short");
                 return;
             }
 
@@ -590,9 +608,9 @@ void AppController::onBinaryFrameReceived(
                 outputsController_.writeOutput(regAddr, regVal);
 
             if (handledLocally) {
-                Serial.println("[BIN] ✅ Handled locally");
+                Serial.println("[BIN] Handled locally");
             } else {
-                Serial.println("[BIN] ℹ️ Not a local register - ignored");
+                Serial.println("[BIN] Not a local register - ignored");
             }
             break;
         }
@@ -612,7 +630,7 @@ void AppController::onBinaryFrameReceived(
             break;
 
         default:
-            Serial.printf("[BIN] ⚠️ Unhandled cmd: %u\n", hdr.command);
+            Serial.printf("[BIN] Unhandled cmd: %u\n", hdr.command);
             break;
     }
 }

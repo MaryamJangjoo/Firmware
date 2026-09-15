@@ -13,21 +13,11 @@
 #include "ecosmart_registeries.h"
 #include "mybus_frame.h"
 #include "RawRegisterValue.h"
+#include "RegistryControllerBase.h"
 #include "OutputsRegistryController.h"
 #include "AudioRegistryController.h"
 #include "RgbRegistryController.h"
 #include "CurtainRegistryController.h"
-
-// ============================================================
-// Fallback values for build-time configuration.
-//
-// The real values are injected via platformio.ini -> secrets.ini.
-// These fallbacks only exist so the code still compiles if the
-// build_flags are missing (for example when running a syntax
-// check without a secrets.ini file). They are intentionally
-// invalid so that a misconfigured build fails loudly at runtime
-// instead of silently connecting to the wrong network.
-// ============================================================
 
 #ifndef WIFI_SSID
 #define WIFI_SSID "CHANGE_ME_SSID"
@@ -41,12 +31,12 @@
 #define API_BASE_URL "http://192.168.1.100:3000"
 #endif
 
-#ifndef OPERATOR_USERNAME
-#define OPERATOR_USERNAME "CHANGE_ME_USER"
+#ifndef OWNER_USERNAME
+#define OWNER_USERNAME "CHANGE_ME_USER"
 #endif
 
-#ifndef OPERATOR_PASSWORD
-#define OPERATOR_PASSWORD "CHANGE_ME_PASSWORD"
+#ifndef OWNER_PASSWORD
+#define OWNER_PASSWORD "CHANGE_ME_PASSWORD"
 #endif
 
 class AppController {
@@ -91,6 +81,10 @@ private:
     AudioRegistryController   audioController_;
     RgbRegistryController     rgbController_;
     CurtainRegistryController curtainController_;
+
+    // Registry controllers as a base-class list, used for iteration
+    // in onLocalRegistryRead / onShouldSkipMybusWrite.
+    std::vector<RegistryControllerBase*> registryControllers_;
 
     bool ledState     = false;
     bool lastLedState = false;

@@ -2,21 +2,26 @@
 #define OUTPUTS_REGISTRY_CONTROLLER_H
 
 #include <Arduino.h>
-#include "ecosmart_registeries.h"
-#include "RawRegisterValue.h"
+#include <vector>
+
+#include "RegistryControllerBase.h"
 
 // ============================================================
 // OutputsRegistryController
 //
-// مالک منطق خواندن/نوشتن رجیسترهای Digital Input و Digital Output
-// (state + timer_permanent + timer_sleep) و تنها نقطه‌ای که مجاز
-// است روی شیفت‌رجیستر 74HC595 بنویسد (applyToHardware). هر ماژول
-// دیگری که می‌خواهد یک بیت از outputs_object[] را تغییر دهد (مثلاً
-// پرده) باید از طریق این کلاس عمل کند تا از overwrite ناخواسته‌ی کل
-// رجیستر جلوگیری شود.
+// Owns the read/write logic for Digital Input and Digital Output
+// registers (state + timer_permanent + timer_sleep) and is the
+// ONLY place allowed to write to the 74HC595 shift register
+// (applyToHardware). Any other module that wants to toggle a
+// bit in outputs_object[] (e.g. the curtain) must go through
+// this class to avoid overwriting the entire register.
+//
+// NOTE: readLocal() also handles input registers, which are not
+// part of the base class's candidate list. This is intentional:
+// inputs are read-only and don't fit the write-oriented base.
 // ============================================================
 
-class OutputsRegistryController {
+class OutputsRegistryController : public RegistryControllerBase {
 public:
     OutputsRegistryController(int pinLatch, int pinClock, int pinData);
 
@@ -25,12 +30,25 @@ public:
     Registery_t* findOutputEntry(uint16_t regAddr);
     Registery_t* findInputEntry(uint16_t regAddr);
 
+    // Read a local register (output OR input). The base class
+    // read() only covers output candidates; this method extends
+    // it to also cover input registers.
     bool readLocal(uint16_t regAddr, RawRegisterValue& outValue);
-    bool writeOutput(uint16_t regAddr, const String& regVal);
+
+    // Alias for the base class write(), kept for compatibility
+    // with the existing call sites.
+    bool writeOutput(uint16_t regAddr, const String& regVal)
+    {
+        return write(regAddr, regVal);
+    }
 
     String getValue(uint16_t regAddr);
 
     void applyToHardware();
+
+protected:
+    std::vector<Registery_t*> getCandidates() override;
+    void onWrite(uint16_t regAddr) override;
 
 private:
     int pinLatch_;

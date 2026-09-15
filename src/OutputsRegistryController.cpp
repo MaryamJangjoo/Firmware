@@ -1,11 +1,32 @@
 #include "OutputsRegistryController.h"
+
 #include "Outputs.hpp"
 #include "inputs.hpp"
-#include "mybus_value_codec.h"
+
+// ============================================================
+// OutputsRegistryController
+//
+// Owns the 74HC595 shift register chain and the read/write logic
+// for Digital Input and Digital Output registers.
+//
+// Hardware mapping (confirmed by testing):
+//   - Output 0..9   -> LED 1..10
+//   - Output 14     -> Curtain 1
+//   - Output 15     -> Curtain 2
+//
+// The shift register chain is wired such that the FIRST byte
+// shifted out ends up at the LAST register in the chain. This
+// means we must send byteHigh FIRST, then byteLow, so that
+// byteLow ends up driving outputs 0..7.
+// ============================================================
 
 OutputsRegistryController::OutputsRegistryController(
-    int pinLatch, int pinClock, int pinData)
-    : pinLatch_(pinLatch), pinClock_(pinClock), pinData_(pinData)
+    int pinLatch,
+    int pinClock,
+    int pinData)
+    : pinLatch_(pinLatch),
+      pinClock_(pinClock),
+      pinData_(pinData)
 {
 }
 
@@ -14,6 +35,24 @@ void OutputsRegistryController::begin()
     pinMode(pinLatch_, OUTPUT);
     pinMode(pinClock_, OUTPUT);
     pinMode(pinData_, OUTPUT);
+
+    digitalWrite(pinLatch_, LOW);
+    digitalWrite(pinClock_, LOW);
+    digitalWrite(pinData_, LOW);
+}
+
+std::vector<Registery_t*> OutputsRegistryController::getCandidates()
+{
+    std::vector<Registery_t*> candidates;
+    candidates.reserve(OUTPUTS_NUMBER * 3);
+
+    for (size_t i = 0; i < OUTPUTS_NUMBER; i++) {
+        candidates.push_back(&reg_module_output.state[i]);
+        candidates.push_back(&reg_module_output.timer_permanent[i]);
+        candidates.push_back(&reg_module_output.timer_sleep[i]);
+    }
+
+    return candidates;
 }
 
 Registery_t* OutputsRegistryController::findOutputEntry(uint16_t regAddr)
@@ -46,14 +85,17 @@ Registery_t* OutputsRegistryController::findInputEntry(uint16_t regAddr)
     return nullptr;
 }
 
-bool OutputsRegistryController::readLocal(uint16_t regAddr, RawRegisterValue& outValue)
+bool OutputsRegistryController::readLocal(
+    uint16_t regAddr,
+    RawRegisterValue& outValue)
 {
-    Registery_t* entry = findOutputEntry(regAddr);
-
-    if (entry == nullptr) {
-        entry = findInputEntry(regAddr);
+    // First try the output candidates via the base class logic.
+    if (read(regAddr, outValue)) {
+        return true;
     }
 
+    // Fall back to the input registers (read-only).
+    Registery_t* entry = findInputEntry(regAddr);
     if (entry == nullptr || entry->ref == nullptr) {
         return false;
     }
@@ -76,120 +118,8 @@ bool OutputsRegistryController::readLocal(uint16_t regAddr, RawRegisterValue& ou
             outValue.byteLen = sizeof(v);
             break;
         }
-        case reg_datatype_uint32: {
-            uint32_t v = *static_cast<uint32_t*>(entry->ref);
-            memcpy(outValue.bytes, &v, sizeof(v));
-            outValue.byteLen = sizeof(v);
-            break;
-        }
-        case reg_datatype_int8: {
-            int8_t v = *static_cast<int8_t*>(entry->ref);
-            memcpy(outValue.bytes, &v, sizeof(v));
-            outValue.byteLen = sizeof(v);
-            break;
-        }
-        case reg_datatype_int16: {
-            int16_t v = *static_cast<int16_t*>(entry->ref);
-            memcpy(outValue.bytes, &v, sizeof(v));
-            outValue.byteLen = sizeof(v);
-            break;
-        }
-        case reg_datatype_int32: {
-            int32_t v = *static_cast<int32_t*>(entry->ref);
-            memcpy(outValue.bytes, &v, sizeof(v));
-            outValue.byteLen = sizeof(v);
-            break;
-        }
-        case reg_datatype_float: {
-            float v = *static_cast<float*>(entry->ref);
-            memcpy(outValue.bytes, &v, sizeof(v));
-            outValue.byteLen = sizeof(v);
-            break;
-        }
         default:
             return false;
-    }
-
-    return true;
-}
-
-bool OutputsRegistryController::writeOutput(uint16_t regAddr, const String& regVal)
-{
-    Serial.printf("[REG] writeOutput called: 0x%04X = '%s'\n",
-                  regAddr, regVal.c_str());
-
-    Registery_t* entry = findOutputEntry(regAddr);
-
-    if (entry == nullptr || entry->ref == nullptr) {
-        Serial.printf("[REG] Entry not found for 0x%04X\n", regAddr);
-        return false;
-    }
-
-    // Classify the entry: state, timer_permanent, or timer_sleep.
-    enum class EntryKind { NONE, STATE, TIMER_PERMANENT, TIMER_SLEEP };
-    EntryKind kind = EntryKind::NONE;
-    size_t index = 0;
-
-    for (size_t i = 0; i < OUTPUTS_NUMBER; i++) {
-        if (&reg_module_output.state[i] == entry) {
-            kind = EntryKind::STATE;
-            index = i;
-            break;
-        }
-        if (&reg_module_output.timer_permanent[i] == entry) {
-            kind = EntryKind::TIMER_PERMANENT;
-            index = i;
-            break;
-        }
-        if (&reg_module_output.timer_sleep[i] == entry) {
-            kind = EntryKind::TIMER_SLEEP;
-            index = i;
-            break;
-        }
-    }
-
-    if (kind == EntryKind::NONE) {
-        Serial.printf("[REG] Not an output/timer register: 0x%04X\n", regAddr);
-        return false;
-    }
-
-    if (entry->datatype > reg_datatype_float) {
-        Serial.printf("[REG] Unsupported datatype for 0x%04X\n", regAddr);
-        return false;
-    }
-
-    uint8_t buf[8];
-    size_t len = 0;
-
-    if (!encodeRegValueString(regVal, static_cast<MyBusDataType>(entry->datatype),
-                               buf, sizeof(buf), len)) {
-        Serial.printf("[REG] Failed to parse '%s'\n", regVal.c_str());
-        return false;
-    }
-
-    if (len != entry->size) {
-        Serial.printf("[REG] Size mismatch for 0x%04X\n", regAddr);
-        return false;
-    }
-
-    memcpy(entry->ref, buf, len);
-    Serial.printf("[REG] 0x%04X written\n", regAddr);
-
-    switch (kind) {
-        case EntryKind::STATE:
-            applyToHardware();
-            break;
-
-        case EntryKind::TIMER_PERMANENT:
-            Serial.printf("[REG] timer_permanent[%zu] stored (metadata only)\n", index);
-            break;
-
-        case EntryKind::TIMER_SLEEP:
-            Serial.printf("[REG] timer_sleep[%zu] stored (metadata only)\n", index);
-            break;
-
-        default:
-            break;
     }
 
     return true;
@@ -241,18 +171,50 @@ String OutputsRegistryController::getValue(uint16_t regAddr)
     }
 }
 
+void OutputsRegistryController::onWrite(uint16_t regAddr)
+{
+    Registery_t* entry = findOutputEntry(regAddr);
+    if (entry == nullptr) {
+        return;
+    }
+
+    // Detect which array the entry belongs to.
+    for (size_t i = 0; i < OUTPUTS_NUMBER; i++) {
+        if (&reg_module_output.state[i] == entry) {
+            applyToHardware();
+            return;
+        }
+    }
+
+    for (size_t i = 0; i < OUTPUTS_NUMBER; i++) {
+        if (&reg_module_output.timer_permanent[i] == entry) {
+            Serial.printf("[REG] timer_permanent[%zu] stored (metadata only)\n", i);
+            return;
+        }
+    }
+
+    for (size_t i = 0; i < OUTPUTS_NUMBER; i++) {
+        if (&reg_module_output.timer_sleep[i] == entry) {
+            Serial.printf("[REG] timer_sleep[%zu] stored (metadata only)\n", i);
+            return;
+        }
+    }
+}
+
 void OutputsRegistryController::applyToHardware()
 {
-    Serial.println("!!! 🔄 applyToHardware CALLED !!!");
-
-    uint8_t byteLow = 0;
+    // Hardware mapping (confirmed by testing):
+    //   - When byteLow is shifted out first and byteHigh second,
+    //     the logical output index maps directly to the physical
+    //     LED/relay position:
+    //       output 0..9   -> LED 1..10 (with output 0 also driving a relay)
+    //       output 14..15 -> curtain
+    //   - The previously tried "byteHigh first" order scrambled
+    //     the mapping, so it has been reverted.
+    uint8_t byteLow  = 0;
     uint8_t byteHigh = 0;
 
-    Serial.println("[OUTPUTS] Current states:");
     for (size_t i = 0; i < OUTPUTS_NUMBER; i++) {
-        Serial.printf("  [%zu] = %d (addr=0x%04X)\n",
-                      i, outputs_object[i].value,
-                      reg_module_output.state[i].address);
         if (outputs_object[i].value) {
             if (i < 8) {
                 byteLow |= (1U << i);
@@ -262,12 +224,8 @@ void OutputsRegistryController::applyToHardware()
         }
     }
 
-    Serial.printf("[OUTPUTS] Sending: byteHigh=0x%02X, byteLow=0x%02X\n", byteHigh, byteLow);
-
     digitalWrite(pinLatch_, LOW);
     shiftOut(pinData_, pinClock_, LSBFIRST, byteLow);
     shiftOut(pinData_, pinClock_, LSBFIRST, byteHigh);
     digitalWrite(pinLatch_, HIGH);
-
-    Serial.println("[OUTPUTS] ✅ Shift register updated");
 }
