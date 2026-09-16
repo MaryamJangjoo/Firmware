@@ -17,6 +17,11 @@ MybusTransport::MybusTransport(
 {
 }
 
+bool MybusTransport::isSessionEstablished() const
+{
+    return session_.isEstablished();
+}
+
 bool MybusTransport::validateAddress(
     uint8_t deviceId,
     uint8_t zone) const
@@ -751,10 +756,10 @@ bool MybusTransport::sendRegistryFrame(
 
     const bool ok =
         sendMybusBinaryFrame(
-            0,                              
-            session_.interfaceId(),         
-            session_.zone(),                
-            busDeviceId,                    
+            0,
+            session_.interfaceId(),
+            session_.zone(),
+            busDeviceId,
             static_cast<uint16_t>(
                 requestNumber & 0xFFFFU
             ),
@@ -1121,8 +1126,6 @@ bool MybusTransport::sendMybusData(
         }
     }
 
-    // Empty RegVal = READ
-    // Non-empty RegVal = WRITE
     const bool isWrite =
         !regVal.isEmpty();
 
@@ -1136,13 +1139,6 @@ bool MybusTransport::sendMybusData(
         outResponse
     );
 }
-
-// ============================================================
-// Generic control-frame helpers used by CloudWebSocketServer.
-// These do not perform any HTTP I/O. They build or parse the
-// same encrypted wire format ([IV][CIPHERTEXT][TAG]) that the
-// mYBUS v2 protocol uses over the local WebSocket channel.
-// ============================================================
 
 bool MybusTransport::buildControlFrame(
     uint8_t command,
@@ -1177,7 +1173,7 @@ bool MybusTransport::buildControlFrame(
     hdr.sequence        = 0;
     hdr.interfaceId     = session_.interfaceId();
     hdr.zone            = session_.zone();
-    hdr.deviceId        = 0; // Control channel is not addressed to a bus device
+    hdr.deviceId        = 0;
     hdr.reserved        = 0;
     hdr.requestNumber   = requestNumber;
     hdr.qos             = mybus_proto::QOS_DEFAULT;

@@ -7,11 +7,20 @@
 #include "RegistryControllerBase.h"
 #include "OutputsRegistryController.h"
 
+// ============================================================
+// CurtainRegistryController
+//
+// Controls the motorized curtain via two dedicated outputs:
+//   index 14 (0x800E) -> Open channel
+//   index 15 (0x800F) -> Close channel
+//
+// These indices are defined in ecosmart_registeries.h as
+// CURTAIN_OUTPUT_OPEN and CURTAIN_OUTPUT_CLOSE.
+// ============================================================
+
 class CurtainRegistryController : public RegistryControllerBase {
 public:
-    CurtainRegistryController(
-        OutputsRegistryController& outputs,
-        size_t outputIndex);
+    explicit CurtainRegistryController(OutputsRegistryController& outputs);
 
 protected:
     std::vector<Registery_t*> getCandidates() override;
@@ -19,7 +28,6 @@ protected:
 
 private:
     OutputsRegistryController& outputs_;
-    size_t outputIndex_;
 };
 
-#endif 
+#endif

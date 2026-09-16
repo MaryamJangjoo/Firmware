@@ -5,7 +5,6 @@
 #include "mybus_protocol_constants.h"
 #include <esp_wifi.h>
 #include <ESPmDNS.h>
-
 #ifndef WIFI_STA
 #define WIFI_STA 1
 #endif
@@ -18,7 +17,7 @@ AppController::AppController()
       outputsController_(PIN_SR_LATCH, PIN_SR_CLOCK, PIN_SR_DATA),
       audioController_(amp, bta),
       rgbController_(leds, NUM_LEDS),
-      curtainController_(outputsController_, CURTAIN_OUTPUT_INDEX)
+      curtainController_(outputsController_)
 {
     // Populate the base-class list after all controllers are constructed.
     registryControllers_ = {
@@ -120,7 +119,7 @@ void AppController::handle()
 }
 
 // ============================================================
-// WiFi Connection (improved with scan + country)
+// WiFi Connection
 // ============================================================
 
 static const char* wifiStatusToString(wl_status_t status);
@@ -188,8 +187,7 @@ bool AppController::connectToWiFi()
 
                 if (enc == WIFI_AUTH_WPA3_PSK) {
                     Serial.println(
-                        "[WiFi] Network is WPA3-only - ESP32 may fail to connect. "
-                        "Try switching router to WPA2-PSK (AES)."
+                        "[WiFi] Network is WPA3-only - ESP32 may fail to connect."
                     );
                 }
             }
@@ -199,11 +197,6 @@ bool AppController::connectToWiFi()
             Serial.printf(
                 "[WiFi] Target SSID '%s' was NOT found in scan.\n",
                 WIFI_SSID
-            );
-            Serial.println(
-                "[WiFi] This usually means: (a) router broadcasts this SSID "
-                "only on 5GHz (ESP32 supports 2.4GHz only), or (b) SSID/typo mismatch, "
-                "or (c) router too far / hidden SSID."
             );
         }
     }
@@ -355,6 +348,23 @@ void AppController::initCloudManager()
         return outputsController_.findOutputEntry(regAddr) != nullptr;
     });
 
+    cloudManager->onLocalRegistryWrite([this](
+        uint16_t regAddr,
+        const String& value
+    ) {
+        const bool handled =
+            audioController_.write(regAddr, value)
+            || rgbController_.write(regAddr, value)
+            || curtainController_.write(regAddr, value)
+            || outputsController_.writeOutput(regAddr, value);
+
+        Serial.printf("[LOCAL-WS] %s 0x%04X = '%s'\n",
+                      handled ? "OK" : "FAIL",
+                      regAddr, value.c_str());
+
+        return handled;
+    });
+
     Serial.println("[CLOUD] CloudManager initialized successfully");
 }
 
@@ -451,13 +461,14 @@ void AppController::handleWiFiReconnect()
 
 void AppController::handleLedState()
 {
-    // Legacy: nothing sets ledState anymore (the curtain has its own
-    // dedicated register path). This is kept as a hook for a possible
-    // future physical input.
+    // Legacy: nothing sets ledState anymore. If a future physical
+    // input toggles it, only the first LED_OUTPUT_COUNT outputs
+    // (the LEDs) should be affected - never the curtain channels
+    // at indices 14 and 15.
     if (lastLedState != ledState) {
         lastLedState = ledState;
 
-        for (size_t i = 0; i < OUTPUTS_NUMBER; i++) {
+        for (size_t i = 0; i < LED_OUTPUT_COUNT; i++) {
             outputs_object[i].value = ledState;
         }
         outputsController_.applyToHardware();
@@ -504,7 +515,7 @@ void AppController::btDataTrampoline(const uint8_t* data, uint32_t len)
 }
 
 // ============================================================
-// rawPayloadToRegValString — convert raw bytes to String
+// rawPayloadToRegValString - convert raw bytes to String
 // ============================================================
 
 String AppController::rawPayloadToRegValString(

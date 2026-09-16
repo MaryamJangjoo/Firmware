@@ -85,6 +85,7 @@ public:
         std::vector<uint8_t>& outPayload,
         MyBusFrameError& outError
     );
+    bool isSessionEstablished() const;
 
 private:
  

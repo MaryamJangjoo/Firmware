@@ -48,6 +48,7 @@ public:
     void onBinaryFrame(CloudWebSocketServer::BinaryFrameCallback cb);
 
     void onLocalRegistryRead(CloudWebSocketServer::LocalRegistryReadCallback cb);
+    void onLocalRegistryWrite(CloudWebSocketServer::LocalRegistryWriteCallback cb);
     void onShouldSkipMybusWrite(CloudWebSocketServer::ShouldSkipMybusWriteCallback cb);
 
     void setApiBaseUrl(const String& url);

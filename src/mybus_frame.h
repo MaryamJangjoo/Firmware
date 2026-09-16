@@ -173,27 +173,7 @@ bool mybus_parseRegistryPayload(
     size_t &outValueLen
 );
 
-// ============================================================
-// Incoming Frame Validation
-//
-// اعتبارسنجی یک فریم خام (رمزگشایی‌شده/رمزنگاری‌نشده) دقیقاً طبق مراحل زیر:
-// 1. دریافت آرایه بایت
-// 2. چک نسخه پروتکل
-// 3. چک حداقل طول بسته
-// 4. چک CRC32   (پیش‌نیاز فنی: تطبیق length اعلام‌شده با طول واقعی)
-// 5. چک اینترفیس
-// 6. چک پرچم‌ها (بیت‌های رزرو باید صفر باشند)
-// 7. چک Command (فقط در لیست مجاز)
-// ============================================================
 
-// Allowed command codes for incoming frames.
-//
-// Commands are now separated:
-//   READ_REGISTRY  = 0x00
-//   WRITE_REGISTRY = 0x01
-//
-// This means the receiver can distinguish read vs write without
-// inspecting the payload length.
 static constexpr uint8_t MYBUS_ALLOWED_COMMANDS[] = {
     MYBUS_CMD_READ_REGISTRY,   // 0x00
     MYBUS_CMD_WRITE_REGISTRY,  // 0x01

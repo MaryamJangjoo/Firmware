@@ -3,22 +3,7 @@
 #include "Outputs.hpp"
 #include "inputs.hpp"
 
-// ============================================================
-// OutputsRegistryController
-//
-// Owns the 74HC595 shift register chain and the read/write logic
-// for Digital Input and Digital Output registers.
-//
-// Hardware mapping (confirmed by testing):
-//   - Output 0..9   -> LED 1..10
-//   - Output 14     -> Curtain 1
-//   - Output 15     -> Curtain 2
-//
-// The shift register chain is wired such that the FIRST byte
-// shifted out ends up at the LAST register in the chain. This
-// means we must send byteHigh FIRST, then byteLow, so that
-// byteLow ends up driving outputs 0..7.
-// ============================================================
+
 
 OutputsRegistryController::OutputsRegistryController(
     int pinLatch,

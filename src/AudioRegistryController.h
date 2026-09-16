@@ -18,8 +18,11 @@ protected:
     void onWrite(uint16_t regAddr) override;
 
 private:
+    void enableEqIfNeeded();
+
     tas5805m& amp_;
     btAudio& bta_;
+    bool eqEnabled_ = false;
 };
 
-#endif 
+#endif

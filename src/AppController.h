@@ -69,10 +69,6 @@ private:
     static constexpr uint8_t MYBUS_DEVICE_ID = 1;
     static constexpr uint8_t MYBUS_ZONE_ID   = 1;
 
-    // TODO: must be confirmed from schematic before connecting
-    // to the real curtain motor.
-    static constexpr size_t CURTAIN_OUTPUT_INDEX = 15;
-
     tas5805m amp;
     btAudio  bta;
     CRGB     leds[NUM_LEDS];

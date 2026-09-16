@@ -518,6 +518,11 @@ void CloudManager::onShouldSkipMybusWrite(
     wsServer_.onShouldSkipMybusWrite(cb);
 }
 
+void CloudManager::onLocalRegistryWrite(
+CloudWebSocketServer::LocalRegistryWriteCallback cb)
+{
+wsServer_.setLocalRegistryWrite(cb);
+}
 void CloudManager::setApiBaseUrl(
     const String& url)
 {
