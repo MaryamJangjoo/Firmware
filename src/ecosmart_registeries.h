@@ -6,6 +6,7 @@
 #include "Outputs.hpp"
 #include "rgb.hpp"
 #include "curtain.hpp"
+#include "cloud.hpp"
 
 typedef enum
 {
@@ -74,11 +75,22 @@ typedef struct
     Registery_t timer_permanent;
 } reg_module_curtain_t;
 
+typedef struct
+{
+    Registery_t server_fqdn;
+    Registery_t server_ip;
+    Registery_t server_port;
+    Registery_t device_id;
+    Registery_t username;
+    Registery_t password;
+} reg_module_cloud_t;
+
 extern reg_module_input_t reg_module_input;
 extern reg_module_output_t reg_module_output;
 extern reg_module_audio_t reg_module_audio;
 extern reg_module_rgb_t reg_module_rgb;
 extern reg_module_curtain_t reg_module_curtain;
+extern reg_module_cloud_t reg_module_cloud;
 
 // ---- Digital Inputs (Read-only) ----
 static constexpr uint16_t REG_ADD_INPUT_STATE[16] = {
@@ -114,12 +126,12 @@ static constexpr uint16_t REG_ADD_ACTIVE_POWER = 0x0703;
 static constexpr uint16_t REG_ADD_REACTIVE_POWER = 0x0704;
 
 // ---- Cloud Connectivity (System) ----
-static constexpr uint16_t REG_ADD_SERVER_FQDN = 0xC800;
-static constexpr uint16_t REG_ADD_SERVER_IP = 0xC801;
-static constexpr uint16_t REG_ADD_SERVER_PORT = 0xC200;
-static constexpr uint16_t REG_ADD_DEVICE_ID = 0x4800;
-static constexpr uint16_t REG_ADD_USERNAME = 0xC802;
-static constexpr uint16_t REG_ADD_PASSWORD = 0xC803;
+static constexpr uint16_t REG_ADD_CLOUD_SERVER_FQDN = 0xC800;
+static constexpr uint16_t REG_ADD_CLOUD_SERVER_IP   = 0xC801;
+static constexpr uint16_t REG_ADD_CLOUD_SERVER_PORT = 0xC200;
+static constexpr uint16_t REG_ADD_CLOUD_DEVICE_ID   = 0x4800;
+static constexpr uint16_t REG_ADD_CLOUD_USERNAME    = 0xC802;
+static constexpr uint16_t REG_ADD_CLOUD_PASSWORD    = 0xC803;
 
 // ---- Motorized Curtain Control ----
 static constexpr uint16_t REG_ADD_CURTAIN_STATE = 0x8100;

@@ -8,20 +8,6 @@
 #include "RawRegisterValue.h"
 #include "mybus_value_codec.h"
 
-// ============================================================
-// RegistryControllerBase
-//
-// Base class for all registry controllers (Audio, RGB, Curtain,
-// Outputs). Provides the common read/write/findEntry logic that
-// was previously duplicated in every controller.
-//
-// Subclasses must override:
-//   - getCandidates(): return the list of Registery_t entries
-//     this controller is responsible for.
-//   - onWrite(regAddr): called after a successful write to apply
-//     the change to the hardware (optional; default is no-op).
-// ============================================================
-
 class RegistryControllerBase {
 public:
     virtual ~RegistryControllerBase() = default;
@@ -37,7 +23,9 @@ public:
         return nullptr;
     }
 
-    bool read(uint16_t regAddr, RawRegisterValue& outValue)
+    // Marked virtual so controllers with special read semantics
+    // (e.g. masking secrets) can override the default behavior.
+    virtual bool read(uint16_t regAddr, RawRegisterValue& outValue)
     {
         Registery_t* entry = findEntry(regAddr);
         if (entry == nullptr || entry->ref == nullptr) {

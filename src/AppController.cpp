@@ -5,6 +5,7 @@
 #include "mybus_protocol_constants.h"
 #include <esp_wifi.h>
 #include <ESPmDNS.h>
+
 #ifndef WIFI_STA
 #define WIFI_STA 1
 #endif
@@ -17,14 +18,18 @@ AppController::AppController()
       outputsController_(PIN_SR_LATCH, PIN_SR_CLOCK, PIN_SR_DATA),
       audioController_(amp, bta),
       rgbController_(leds, NUM_LEDS),
-      curtainController_(outputsController_)
+      curtainController_(outputsController_),
+      cloudController_(cloudStore_)
 {
     // Populate the base-class list after all controllers are constructed.
+    // The Cloud controller is appended so its registers participate in
+    // the same iteration path as the others.
     registryControllers_ = {
         &audioController_,
         &rgbController_,
         &curtainController_,
         &outputsController_,
+        &cloudController_,
     };
 
     s_instance = this;
@@ -47,6 +52,18 @@ void AppController::begin()
 
     ecosmart_registery_init();
 
+    // Load cloud connectivity registers from NVS before any
+    // registry read/write can occur. The store applies its
+    // values to cloud_object through the bindings created by
+    // ecosmart_registery_init().
+    cloudStore_.begin();
+    cloud_object.server_fqdn = cloudStore_.getServerFqdn();
+    cloud_object.server_ip   = cloudStore_.getServerIp();
+    cloud_object.server_port = cloudStore_.getServerPort();
+    cloud_object.username    = cloudStore_.getUsername();
+    cloud_object.password    = cloudStore_.getPassword();
+    cloud_object.device_id   = cloudStore_.getDeviceId();
+
     if (!connectToWiFi()) {
         Serial.println("[ERROR] WiFi connection failed. Retrying in 5 seconds...");
         delay(5000);
@@ -66,11 +83,34 @@ void AppController::begin()
     }
 
     initCloudManager();
+
+    // Wire the controller to CloudManager so IP / Port / credentials
+    // changes are propagated as soon as they are written.
+    cloudController_.attachCloudManager(cloudManager);
+    cloudController_.syncDeviceIdFromCloudManager();
+
+    // If the store contains a persisted API base URL, prefer it
+    // over the compile-time default.
+    if (cloudStore_.isConfigured()) {
+        const String persistedUrl = cloudStore_.buildApiBaseUrl();
+        if (!persistedUrl.isEmpty()) {
+            Serial.printf("[CLOUD-REG] Applying persisted apiBaseUrl: %s\n",
+                          persistedUrl.c_str());
+            cloudManager->setApiBaseUrl(persistedUrl);
+        }
+    }
+
     configureMybusAddress();
 
     Serial.println("[AUTH] Attempting to login...");
     bool loginSuccess = cloudManager->loginUser(
-        OWNER_USERNAME, OWNER_PASSWORD, cloudManager->getDeviceId());
+        cloud_object.username.isEmpty()
+            ? String(OWNER_USERNAME)
+            : cloud_object.username,
+        cloud_object.password.isEmpty()
+            ? String(OWNER_PASSWORD)
+            : cloud_object.password,
+        cloudManager->getDeviceId());
 
     if (loginSuccess) {
         Serial.println("[AUTH] Login successful!");
@@ -356,6 +396,7 @@ void AppController::initCloudManager()
             audioController_.write(regAddr, value)
             || rgbController_.write(regAddr, value)
             || curtainController_.write(regAddr, value)
+            || cloudController_.write(regAddr, value)
             || outputsController_.writeOutput(regAddr, value);
 
         Serial.printf("[LOCAL-WS] %s 0x%04X = '%s'\n",
@@ -616,6 +657,7 @@ void AppController::onBinaryFrameReceived(
                 audioController_.write(regAddr, regVal) ||
                 rgbController_.write(regAddr, regVal) ||
                 curtainController_.write(regAddr, regVal) ||
+                cloudController_.write(regAddr, regVal) ||
                 outputsController_.writeOutput(regAddr, regVal);
 
             if (handledLocally) {

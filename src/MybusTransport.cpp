@@ -63,7 +63,7 @@ bool MybusTransport::sendMybusBinaryFrame(
     size_t payloadLen,
     JsonDocument* outResponse)
 {
-    if (payloadLen > MYBUS_MAX_PAYLOAD_SIZE) {
+    if (payloadLen > kMaxPayloadSize) {
         Serial.printf(
             "[mYBUS] Payload too large: %u\n",
             static_cast<unsigned>(payloadLen)
@@ -108,7 +108,7 @@ bool MybusTransport::sendMybusBinaryFrame(
 
     const size_t maxFrameSize =
         MYBUS_HEADER_SIZE +
-        MYBUS_MAX_PAYLOAD_SIZE +
+        kMaxPayloadSize +
         MYBUS_CRC_SIZE;
 
     std::vector<uint8_t> plainFrame(
@@ -499,14 +499,12 @@ void MybusTransport::decodeRegistryResponseValue(
         hex.length() / 2;
 
     if (valueLen == 0 ||
-        valueLen > MYBUS_MAX_PAYLOAD_SIZE) {
+        valueLen > kMaxPayloadSize) {
 
         return;
     }
 
-    uint8_t value[
-        MYBUS_MAX_PAYLOAD_SIZE
-    ];
+    uint8_t value[kMaxPayloadSize];
 
     if (!cryptoHexToBytes(
             hex,
@@ -691,7 +689,7 @@ bool MybusTransport::sendRegistryFrame(
     }
 
     if (valueLen >
-        MYBUS_MAX_PAYLOAD_SIZE - 2) {
+        kMaxPayloadSize - 2) {
 
         Serial.printf(
             "[mYBUS] Registry value too large: %u\n",
@@ -1150,7 +1148,7 @@ bool MybusTransport::buildControlFrame(
 {
     outWire.clear();
 
-    if (payloadLen > MYBUS_MAX_PAYLOAD_SIZE) {
+    if (payloadLen > kMaxPayloadSize) {
         Serial.printf(
             "[mYBUS-WS] Payload too large: %u\n",
             static_cast<unsigned>(payloadLen)
@@ -1184,7 +1182,7 @@ bool MybusTransport::buildControlFrame(
     hdr.command         = command;
 
     const size_t maxFrameSize =
-        MYBUS_HEADER_SIZE + MYBUS_MAX_PAYLOAD_SIZE + MYBUS_CRC_SIZE;
+        MYBUS_HEADER_SIZE + kMaxPayloadSize + MYBUS_CRC_SIZE;
 
     std::vector<uint8_t> plainFrame(maxFrameSize);
     std::vector<uint8_t> ciphertext(maxFrameSize);

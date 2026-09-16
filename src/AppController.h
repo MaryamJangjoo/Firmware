@@ -18,6 +18,8 @@
 #include "AudioRegistryController.h"
 #include "RgbRegistryController.h"
 #include "CurtainRegistryController.h"
+#include "CloudRegistryStore.h"
+#include "CloudRegistryController.h"
 
 #ifndef WIFI_SSID
 #define WIFI_SSID "CHANGE_ME_SSID"
@@ -77,6 +79,13 @@ private:
     AudioRegistryController   audioController_;
     RgbRegistryController     rgbController_;
     CurtainRegistryController curtainController_;
+
+    // Persistent storage for Cloud Connectivity registers.
+    CloudRegistryStore      cloudStore_;
+
+    // Registry controller for the Cloud Connectivity module.
+    // Constructed after cloudStore_ so the reference is valid.
+    CloudRegistryController cloudController_;
 
     // Registry controllers as a base-class list, used for iteration
     // in onLocalRegistryRead / onShouldSkipMybusWrite.

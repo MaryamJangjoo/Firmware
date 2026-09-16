@@ -4,12 +4,14 @@
 #include "audio.hpp"
 #include "rgb.hpp"
 #include "curtain.hpp"
+#include "cloud.hpp"
 
 reg_module_input_t reg_module_input;
 reg_module_output_t reg_module_output;
 reg_module_audio_t reg_module_audio;
 reg_module_rgb_t reg_module_rgb;
 reg_module_curtain_t reg_module_curtain;
+reg_module_cloud_t reg_module_cloud;
 
 void ecosmart_registery_init()
 {
@@ -147,4 +149,47 @@ void ecosmart_registery_init()
     reg_module_curtain.timer_permanent.size     = sizeof(curtain_object.timer_permanent);
     reg_module_curtain.timer_permanent.ref      = &curtain_object.timer_permanent;
     reg_module_curtain.timer_permanent.writable = true;
+
+    // ---- Cloud Connectivity (System) ----
+    // Backed by cloud_object and persisted via CloudRegistryStore.
+    reg_module_cloud.server_fqdn.address  = REG_ADD_CLOUD_SERVER_FQDN;
+    reg_module_cloud.server_fqdn.datatype = reg_datatype_string;
+    reg_module_cloud.server_fqdn.ref      = &cloud_object.server_fqdn;
+    reg_module_cloud.server_fqdn.size     = 0;
+    reg_module_cloud.server_fqdn.isString = true;
+    reg_module_cloud.server_fqdn.writable = true;
+
+    reg_module_cloud.server_ip.address  = REG_ADD_CLOUD_SERVER_IP;
+    reg_module_cloud.server_ip.datatype = reg_datatype_string;
+    reg_module_cloud.server_ip.ref      = &cloud_object.server_ip;
+    reg_module_cloud.server_ip.size     = 0;
+    reg_module_cloud.server_ip.isString = true;
+    reg_module_cloud.server_ip.writable = true;
+
+    reg_module_cloud.server_port.address  = REG_ADD_CLOUD_SERVER_PORT;
+    reg_module_cloud.server_port.datatype = reg_datatype_uint16;
+    reg_module_cloud.server_port.size     = sizeof(cloud_object.server_port);
+    reg_module_cloud.server_port.ref      = &cloud_object.server_port;
+    reg_module_cloud.server_port.writable = true;
+
+    reg_module_cloud.device_id.address  = REG_ADD_CLOUD_DEVICE_ID;
+    reg_module_cloud.device_id.datatype = reg_datatype_string;
+    reg_module_cloud.device_id.ref      = &cloud_object.device_id;
+    reg_module_cloud.device_id.size     = 0;
+    reg_module_cloud.device_id.isString = true;
+    reg_module_cloud.device_id.writable = false;  // R (read-only)
+
+    reg_module_cloud.username.address  = REG_ADD_CLOUD_USERNAME;
+    reg_module_cloud.username.datatype = reg_datatype_string;
+    reg_module_cloud.username.ref      = &cloud_object.username;
+    reg_module_cloud.username.size     = 0;
+    reg_module_cloud.username.isString = true;
+    reg_module_cloud.username.writable = true;
+
+    reg_module_cloud.password.address  = REG_ADD_CLOUD_PASSWORD;
+    reg_module_cloud.password.datatype = reg_datatype_string;
+    reg_module_cloud.password.ref      = &cloud_object.password;
+    reg_module_cloud.password.size     = 0;
+    reg_module_cloud.password.isString = true;
+    reg_module_cloud.password.writable = true;
 }

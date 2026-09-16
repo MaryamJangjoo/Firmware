@@ -8,10 +8,9 @@
 #include "HttpTransport.h"
 #include "MybusSession.h"
 
-// ⚠️ عمداً mybus_frame.h اینجا include نمی‌شود: آن فایل ماکروی
-// MYBUS_MAX_PAYLOAD_SIZE (=128) را تعریف می‌کند که با نام عضو کلاس
-// پایین (constexpr size_t MYBUS_MAX_PAYLOAD_SIZE = 512;) تداخل متنی
-// پیدا می‌کند. به‌جایش فقط forward-declare می‌کنیم.
+// Forward declarations to avoid pulling in mybus_frame.h, which
+// defines MYBUS_MAX_PAYLOAD_SIZE as a macro and would collide with
+// any identifier of the same name in this header.
 struct MyBusHeader;
 enum class MyBusFrameError : uint8_t;
 
@@ -55,18 +54,6 @@ public:
         JsonDocument* outResponse = nullptr
     );
 
-    // ========================================================
-    // Generic control-frame helpers - بدون هیچ I/O روی HTTP.
-    //
-    // این‌ها توسط CloudWebSocketServer استفاده می‌شوند تا همان فرمت
-    // سیمی رمزنگاری‌شده‌ی mYBUS v2 ([IV][CIPHERTEXT][TAG]) را مستقیماً
-    // روی کانال محلی WebSocket پیاده کنند (به‌جای رفتن از مسیر
-    // HttpTransport::sendRawBinaryToBackend).
-    //
-    // هر دو نیاز دارند session_.isEstablished() true باشد (یعنی
-    // هندشیک ECDH با بک‌اند روی HTTP قبلاً کامل شده باشد).
-    // ========================================================
-
     bool buildControlFrame(
         uint8_t command,
         uint8_t flags,
@@ -85,10 +72,10 @@ public:
         std::vector<uint8_t>& outPayload,
         MyBusFrameError& outError
     );
+
     bool isSessionEstablished() const;
 
 private:
- 
     bool decryptAndParseMybusResponse(
         const uint8_t* wireData,
         size_t wireLen,
@@ -110,7 +97,12 @@ private:
     HttpTransport& transport_;
     MybusSession& session_;
 
-    static constexpr size_t MYBUS_MAX_PAYLOAD_SIZE = 512;
+    // NOTE: this is a class-scoped constant, not the global macro
+    // MYBUS_MAX_PAYLOAD_SIZE defined in mybus_frame.h. Keeping the
+    // same name here was the source of a name collision that broke
+    // the build, so it is renamed to kMaxPayloadSize to avoid any
+    // textual substitution by the preprocessor.
+    static constexpr size_t kMaxPayloadSize = 512;
 };
 
 #endif
