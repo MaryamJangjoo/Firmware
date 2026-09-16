@@ -18,14 +18,24 @@
 //   - All string registers are returned as RegRawType::STRING.
 //   - ServerPort is returned as RegRawType::UINT16.
 //   - DeviceId is returned as RegRawType::STRING.
-//   - Password is returned masked as "****" (writable but
-//     never readable in clear text via the WS channel).
+//   - Password is returned masked as "****" and is never
+//     readable in clear text via the WS channel.
 //
 // Write behavior:
 //   - Each write updates CloudRegistryStore immediately.
 //   - onWrite() then propagates the change to CloudManager when
-//     the affected field impacts the backend connection (IP,
-//     Port, Username, Password).
+//     the affected field impacts the backend connection
+//     (FQDN, IP, Port, Username, Password).
+//   - A write of the literal mask "****" to the password
+//     register is rejected, so a read-all/write-all client
+//     cannot destroy the stored secret.
+//
+// Startup order (AppController):
+//   1. store.begin()
+//   2. ctl.attachCloudManager(&cloudManager)
+//   3. ctl.applyStoredConfig()          <-- before login()
+//   4. cloudManager.login() / handshake
+//   5. ctl.syncDeviceIdFromCloudManager()
 // ============================================================
 
 class CloudManager;
@@ -34,13 +44,10 @@ class CloudRegistryController : public RegistryControllerBase {
 public:
     explicit CloudRegistryController(CloudRegistryStore& store);
 
-    // Called once after CloudManager is constructed so the
-    // controller can push API URL / credential changes back
-    // into the cloud layer.
     void attachCloudManager(CloudManager* mgr) { cloudManager_ = mgr; }
+   
+    void applyStoredConfig();
 
-    // Mirror the current deviceId from CloudManager into the
-    // store. Called by AppController once at startup.
     void syncDeviceIdFromCloudManager();
 
 protected:
@@ -50,11 +57,13 @@ protected:
     bool read(uint16_t regAddr, RawRegisterValue& outValue) override;
 
 private:
-    void applyToCloudManager(uint16_t regAddr);
+    void   applyToCloudManager(uint16_t regAddr);
+    void   rebuildAndApplyUrl();
+    void   mirrorStoreIntoRegistry();
     String maskedPassword() const;
 
     CloudRegistryStore& store_;
     CloudManager*       cloudManager_ = nullptr;
 };
 
-#endif
+#endif 

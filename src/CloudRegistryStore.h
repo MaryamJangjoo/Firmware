@@ -17,28 +17,27 @@
 //     read-only by the registry layer.
 //   - Password is stored as-is in NVS. NVS is encrypted on
 //     ESP32 when flash encryption is enabled. On plain flash
-//     it is not, so treat the device physically secure.
+//     it is not, so treat the device as physically sensitive.
 //   - All setters persist immediately. There is no explicit
 //     flush() required by callers.
-//   - String values are capped at MAX_STRING_LEN to bound the
-//     amount of NVS storage used and to keep the WS payload
-//     size predictable.
+//   - If begin() failed, setters do NOT mutate the in-RAM copy
+//     either, so RAM and NVS can never diverge silently.
+//   - String values are capped at MAX_STRING_LEN.
+//   - buildApiBaseUrl() prefers FQDN over IP when both are set.
 // ============================================================
 
 class CloudRegistryStore {
 public:
-    static constexpr size_t MAX_STRING_LEN = 64;
-    static constexpr uint16_t DEFAULT_PORT = 3000;
+    static constexpr size_t   MAX_STRING_LEN = 64;
+    static constexpr uint16_t DEFAULT_PORT   = 3000;
 
     CloudRegistryStore();
 
-    // Must be called once during startup before any getter or
-    // setter. Returns false if the NVS namespace could not be
-    // opened (in which case all values stay at defaults and the
-    // setters become no-ops).
     bool begin();
 
-    // Getters
+    bool isOpen() const { return opened_; }
+
+
     String   getServerFqdn() const { return serverFqdn_; }
     String   getServerIp()   const { return serverIp_; }
     uint16_t getServerPort() const { return serverPort_; }
@@ -46,27 +45,35 @@ public:
     String   getPassword()   const { return password_; }
     String   getDeviceId()   const { return deviceId_; }
 
-    // Setters - each one writes to NVS immediately
-    void setServerFqdn(const String& v);
-    void setServerIp(const String& v);
-    void setServerPort(uint16_t v);
-    void setUsername(const String& v);
-    void setPassword(const String& v);
 
-    // DeviceId is set from CloudManager during startup and is
-    // not exposed for external writes through the registry.
-    void setDeviceIdFromCloudManager(const String& v);
+    bool setServerFqdn(const String& v);
+    bool setServerIp(const String& v);
+    bool setServerPort(uint16_t v);
+    bool setUsername(const String& v);
+    bool setPassword(const String& v);
 
-    // Rebuild apiBaseUrl_ from ServerIp + ServerPort
+
+    bool setDeviceIdFromCloudManager(const String& v);
+
     String buildApiBaseUrl() const;
 
-    // True if all required values are present and can be used
-    // to talk to the backend.
     bool isConfigured() const;
+
+
+    bool clearAll();
+
+
+    bool seedDefaults(
+        const String& defaultIp,
+        const String& defaultUsername,
+        const String& defaultPassword
+    );
 
 private:
     void loadFromNvs();
-    void persistString(const char* key, const String& value);
+    bool persistString(const char* key, const String& value);
+
+    static String truncate(const String& value, size_t maxLen);
 
     Preferences prefs_;
     bool        opened_ = false;
@@ -79,4 +86,4 @@ private:
     String   deviceId_;
 };
 
-#endif // CLOUD_REGISTRY_STORE_H
+#endif 

@@ -5,6 +5,7 @@
 #include "mybus_protocol_constants.h"
 #include <esp_wifi.h>
 #include <ESPmDNS.h>
+#include "Logging.h"
 
 #ifndef WIFI_STA
 #define WIFI_STA 1
@@ -52,16 +53,43 @@ void AppController::begin()
 
     ecosmart_registery_init();
 
-    // Load cloud connectivity registers from NVS before any
-    // registry read/write can occur. The store applies its
-    // values to cloud_object through the bindings created by
-    // ecosmart_registery_init().
+    // Open the cloud registry NVS store before touching any
+    // cloud_object fields. If the namespace cannot be opened
+    // the setters become no-ops and RAM stays consistent with
+    // the (empty) NVS image.
     cloudStore_.begin();
+
+    // Seed the store from compile-time defaults on first boot.
+    // API_BASE_URL is expected to be of the form
+    // "http://<host>:<port>"; only the host portion is used
+    // here so the IP / FQDN is seeded, not the full URL.
+    {
+        String defaultHost = String(API_BASE_URL);
+        const int schemeEnd = defaultHost.indexOf("://");
+        if (schemeEnd >= 0) {
+            defaultHost = defaultHost.substring(schemeEnd + 3);
+        }
+        const int portEnd = defaultHost.indexOf(':');
+        if (portEnd >= 0) {
+            defaultHost = defaultHost.substring(0, portEnd);
+        }
+
+        cloudStore_.seedDefaults(
+            defaultHost,
+            String(OWNER_USERNAME),
+            String(OWNER_PASSWORD));
+    }
+
+    // Mirror the persisted store values into the registry
+    // process image so reads reflect NVS immediately. The
+    // password is intentionally masked here: the plaintext
+    // value lives only in the store, and a subsequent write of
+    // "****" is rejected by the controller.
     cloud_object.server_fqdn = cloudStore_.getServerFqdn();
     cloud_object.server_ip   = cloudStore_.getServerIp();
     cloud_object.server_port = cloudStore_.getServerPort();
     cloud_object.username    = cloudStore_.getUsername();
-    cloud_object.password    = cloudStore_.getPassword();
+    cloud_object.password    = "****";
     cloud_object.device_id   = cloudStore_.getDeviceId();
 
     if (!connectToWiFi()) {
@@ -84,32 +112,31 @@ void AppController::begin()
 
     initCloudManager();
 
-    // Wire the controller to CloudManager so IP / Port / credentials
-    // changes are propagated as soon as they are written.
+    // Bind the cloud registry controller to the freshly created
+    // CloudManager, then push the persisted config BEFORE any
+    // login attempt. Without applyStoredConfig() the device
+    // silently falls back to the compile-time API_BASE_URL on
+    // every boot and any user-configured server is lost.
     cloudController_.attachCloudManager(cloudManager);
+    cloudController_.applyStoredConfig();
     cloudController_.syncDeviceIdFromCloudManager();
-
-    // If the store contains a persisted API base URL, prefer it
-    // over the compile-time default.
-    if (cloudStore_.isConfigured()) {
-        const String persistedUrl = cloudStore_.buildApiBaseUrl();
-        if (!persistedUrl.isEmpty()) {
-            Serial.printf("[CLOUD-REG] Applying persisted apiBaseUrl: %s\n",
-                          persistedUrl.c_str());
-            cloudManager->setApiBaseUrl(persistedUrl);
-        }
-    }
 
     configureMybusAddress();
 
     Serial.println("[AUTH] Attempting to login...");
+
+    // Prefer the persisted credentials when present, otherwise
+    // fall back to the compile-time owner defaults. The store is
+    // the source of truth for the plaintext password; the
+    // registry object only ever holds the mask.
+    const bool haveStoredUsername = !cloudStore_.getUsername().isEmpty();
+    const bool haveStoredPassword = !cloudStore_.getPassword().isEmpty();
+
     bool loginSuccess = cloudManager->loginUser(
-        cloud_object.username.isEmpty()
-            ? String(OWNER_USERNAME)
-            : cloud_object.username,
-        cloud_object.password.isEmpty()
-            ? String(OWNER_PASSWORD)
-            : cloud_object.password,
+        haveStoredUsername ? cloudStore_.getUsername()
+                           : String(OWNER_USERNAME),
+        haveStoredPassword ? cloudStore_.getPassword()
+                           : String(OWNER_PASSWORD),
         cloudManager->getDeviceId());
 
     if (loginSuccess) {
@@ -247,35 +274,47 @@ bool AppController::connectToWiFi()
     Serial.print("[WiFi] Connecting to ");
     Serial.println(WIFI_SSID);
 
-    if (targetIsOpen) {
+    const bool useOpenPath = targetIsOpen;
+    if (useOpenPath) {
         Serial.println(
-            "[WiFi] Target network scanned as OPEN - connecting without password"
+            "[WiFi] Target network scanned as OPEN - trying without password"
         );
-        WiFi.begin(WIFI_SSID);
-    } else {
-        WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
     }
 
-    int attempts = 0;
-    wl_status_t lastStatus = WL_IDLE_STATUS;
+    int attempt = 0;
+    constexpr int kMaxAttempts = 3;
+    bool connected = false;
 
-    while (WiFi.status() != WL_CONNECTED && attempts < 30) {
-        delay(500);
+    while (attempt < kMaxAttempts && !connected) {
+        ++attempt;
+        Serial.printf("[WiFi] Attempt %d/%d\n", attempt, kMaxAttempts);
 
-        wl_status_t status = WiFi.status();
-        if (status != lastStatus) {
-            Serial.printf("\n[WiFi] status=%d (%s)\n",
-                          status, wifiStatusToString(status));
-            lastStatus = status;
+        if (useOpenPath) {
+            WiFi.begin(WIFI_SSID);
         } else {
-            Serial.print(".");
+            WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
         }
 
-        attempts++;
+        const uint32_t deadline = millis() + 8000;
+        while (WiFi.status() != WL_CONNECTED && millis() < deadline) {
+            delay(100);
+        }
+
+        if (WiFi.status() == WL_CONNECTED) {
+            connected = true;
+            Serial.printf("[WiFi] Connected on attempt %d\n", attempt);
+            break;
+        }
+
+        Serial.printf("[WiFi] Attempt %d failed (status=%d)\n",
+                      attempt, static_cast<int>(WiFi.status()));
+        WiFi.disconnect(true);
+        delay(500);
     }
+
     Serial.println();
 
-    if (WiFi.status() == WL_CONNECTED) {
+    if (connected) {
         Serial.println("[WiFi] Connected!");
         Serial.print("[WiFi] IP: ");
         Serial.println(WiFi.localIP());
@@ -290,8 +329,8 @@ bool AppController::connectToWiFi()
     }
 
     Serial.printf(
-        "[WiFi] Connection failed! Final status=%d (%s)\n",
-        WiFi.status(), wifiStatusToString(WiFi.status())
+        "[WiFi] Connection failed after %d attempts. Final status=%d (%s)\n",
+        attempt, WiFi.status(), wifiStatusToString(WiFi.status())
     );
 
     return false;
