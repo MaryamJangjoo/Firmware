@@ -15,19 +15,39 @@ reg_module_cloud_t reg_module_cloud;
 
 void ecosmart_registery_init()
 {
-    // ---- Digital Inputs (0x0000..0x000F) - Read-only ----
+    // ---- Digital Inputs ----
+    // state:      bool, R/W (write supports LATCHED reset)
+    // mode:       u8,   R/W (0=MOMENTARY, 1=TOGGLE, 2=PULSE, 3=LATCHED)
+    // enabled:    u8,   R/W (0=disabled, 1=enabled)
+    // eventCount: u16,  R   (incremented by the controller)
     for (size_t i = 0; i < INPUTS_NUMBER; i++)
     {
-        reg_module_input.state[i].address = REG_ADD_INPUT_STATE[i];
+        reg_module_input.state[i].address  = REG_ADD_INPUT_STATE[i];
         reg_module_input.state[i].datatype = reg_datatype_bit;
-        reg_module_input.state[i].size = sizeof(inputs_value[0]);
-        reg_module_input.state[i].ref = &inputs_value[i];
-        reg_module_input.state[i].writable = false;   // R (read-only)
+        reg_module_input.state[i].size     = sizeof(inputs_value[i]);
+        reg_module_input.state[i].ref      = &inputs_value[i];
+        reg_module_input.state[i].writable = true;
+
+        reg_module_input.mode[i].address  = REG_ADD_INPUT_MODE[i];
+        reg_module_input.mode[i].datatype = reg_datatype_uint8;
+        reg_module_input.mode[i].size     = sizeof(uint8_t);
+        reg_module_input.mode[i].ref      = &inputs_mode_value[i];
+        reg_module_input.mode[i].writable = true;
+
+        reg_module_input.enabled[i].address  = REG_ADD_INPUT_ENABLED[i];
+        reg_module_input.enabled[i].datatype = reg_datatype_uint8;
+        reg_module_input.enabled[i].size     = sizeof(uint8_t);
+        reg_module_input.enabled[i].ref      = &inputs_enabled_value[i];
+        reg_module_input.enabled[i].writable = true;
+
+        reg_module_input.event_count[i].address  = REG_ADD_INPUT_EVENT_COUNT[i];
+        reg_module_input.event_count[i].datatype = reg_datatype_uint16;
+        reg_module_input.event_count[i].size     = sizeof(uint16_t);
+        reg_module_input.event_count[i].ref      = &inputs_event_count_value[i];
+        reg_module_input.event_count[i].writable = false;
     }
 
-    // ---- Digital Outputs (0x8000..0x800F) - R/W ----
-    // ---- Output Permanent Timers (0x8200..0x820F) - R/W ----
-    // ---- Output Sleep Timers (0x8210..0x821F) - R/W ----
+    // ---- Digital Outputs ----
     for (size_t i = 0; i < OUTPUTS_NUMBER; i++)
     {
         reg_module_output.state[i].address = REG_ADD_OUTPUT_STATE[i];
@@ -79,14 +99,14 @@ void ecosmart_registery_init()
     reg_module_audio.title.ref      = &audio_object.title;
     reg_module_audio.title.size     = 0;
     reg_module_audio.title.isString = true;
-    reg_module_audio.title.writable = false;   // R (read-only)
+    reg_module_audio.title.writable = false;
 
     reg_module_audio.artist.address  = REG_ADD_AUDIO_ARTIST;
     reg_module_audio.artist.datatype = reg_datatype_string;
     reg_module_audio.artist.ref      = &audio_object.artist;
     reg_module_audio.artist.size     = 0;
     reg_module_audio.artist.isString = true;
-    reg_module_audio.artist.writable = false;  // R (read-only)
+    reg_module_audio.artist.writable = false;
 
     reg_module_audio.volume.address  = REG_ADD_AUDIO_VOLUME;
     reg_module_audio.volume.datatype = reg_datatype_uint8;
@@ -151,7 +171,6 @@ void ecosmart_registery_init()
     reg_module_curtain.timer_permanent.writable = true;
 
     // ---- Cloud Connectivity (System) ----
-    // Backed by cloud_object and persisted via CloudRegistryStore.
     reg_module_cloud.server_fqdn.address  = REG_ADD_CLOUD_SERVER_FQDN;
     reg_module_cloud.server_fqdn.datatype = reg_datatype_string;
     reg_module_cloud.server_fqdn.ref      = &cloud_object.server_fqdn;
@@ -177,7 +196,7 @@ void ecosmart_registery_init()
     reg_module_cloud.device_id.ref      = &cloud_object.device_id;
     reg_module_cloud.device_id.size     = 0;
     reg_module_cloud.device_id.isString = true;
-    reg_module_cloud.device_id.writable = false;  // R (read-only)
+    reg_module_cloud.device_id.writable = false;
 
     reg_module_cloud.username.address  = REG_ADD_CLOUD_USERNAME;
     reg_module_cloud.username.datatype = reg_datatype_string;

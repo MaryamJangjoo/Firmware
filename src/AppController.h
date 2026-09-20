@@ -15,6 +15,7 @@
 #include "mybus_frame.h"
 #include "RawRegisterValue.h"
 #include "RegistryControllerBase.h"
+#include "InputsRegistryController.h"
 #include "OutputsRegistryController.h"
 #include "AudioRegistryController.h"
 #include "RgbRegistryController.h"
@@ -76,6 +77,7 @@ private:
     btAudio  bta;
     CRGB     leds[NUM_LEDS];
 
+    InputsRegistryController  inputsController_;
     OutputsRegistryController outputsController_;
     AudioRegistryController   audioController_;
     RgbRegistryController     rgbController_;

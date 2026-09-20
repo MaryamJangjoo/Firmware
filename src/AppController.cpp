@@ -32,7 +32,13 @@ AppController::AppController()
       curtainController_(outputsController_),
       cloudController_(cloudStore_)
 {
+    // The inputs controller needs a late binding to the outputs
+    // controller so that the master channel can drive every
+    // output when it transitions.
+    inputsController_.attachOutputs(&outputsController_);
+
     registryControllers_ = {
+        &inputsController_,
         &audioController_,
         &rgbController_,
         &curtainController_,
@@ -59,6 +65,11 @@ void AppController::begin()
     ECOSMART_LOGI(TAG, "PDN pin set HIGH (TAS5805M active)");
 
     ecosmart_registery_init();
+
+    // Configure the digital inputs after the registry has been
+    // initialized, so that the initial GPIO read uses the
+    // correct pull mode for each channel.
+    inputsController_.begin();
 
     cloudStore_.begin();
 
@@ -164,6 +175,11 @@ void AppController::handle()
         cloudManager->loopWebSocketServer();
     }
 
+    // Scan the physical inputs on every loop iteration. The
+    // controller throttles itself internally using
+    // INPUT_POLL_INTERVAL_MS.
+    inputsController_.poll();
+
     handleWiFiReconnect();
     handleLedState();
 }
@@ -235,7 +251,7 @@ bool AppController::connectToWiFi()
                     "WPA3-only - ESP32 may fail to connect.");
             }
 
-            break; 
+            break;
         }
 
         if (!targetFound) {
@@ -386,7 +402,8 @@ void AppController::initCloudManager()
         const String& value
     ) {
         const bool handled =
-            audioController_.write(regAddr, value)
+            inputsController_.write(regAddr, value)
+            || audioController_.write(regAddr, value)
             || rgbController_.write(regAddr, value)
             || curtainController_.write(regAddr, value)
             || cloudController_.write(regAddr, value)
@@ -473,7 +490,6 @@ void AppController::handleLedState()
         outputsController_.applyToHardware();
     }
 }
-
 
 void AppController::visualizeAudio(const uint8_t* data, uint32_t len)
 {
@@ -609,11 +625,12 @@ void AppController::onBinaryFrameReceived(
                           regAddr, regVal.c_str());
 
             bool handledLocally =
-                audioController_.write(regAddr, regVal) ||
-                rgbController_.write(regAddr, regVal) ||
-                curtainController_.write(regAddr, regVal) ||
-                cloudController_.write(regAddr, regVal) ||
-                outputsController_.writeOutput(regAddr, regVal);
+                inputsController_.write(regAddr, regVal)
+                || audioController_.write(regAddr, regVal)
+                || rgbController_.write(regAddr, regVal)
+                || curtainController_.write(regAddr, regVal)
+                || cloudController_.write(regAddr, regVal)
+                || outputsController_.writeOutput(regAddr, regVal);
 
             if (handledLocally) {
                 ECOSMART_LOGI(TAG_BIN, "Handled locally");
