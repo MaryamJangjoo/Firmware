@@ -2,8 +2,9 @@
 
 #include "Outputs.hpp"
 #include "inputs.hpp"
+#include "Logging.h"
 
-
+static const char* TAG = "OUTPUTS";
 
 OutputsRegistryController::OutputsRegistryController(
     int pinLatch,
@@ -173,14 +174,14 @@ void OutputsRegistryController::onWrite(uint16_t regAddr)
 
     for (size_t i = 0; i < OUTPUTS_NUMBER; i++) {
         if (&reg_module_output.timer_permanent[i] == entry) {
-            Serial.printf("[REG] timer_permanent[%zu] stored (metadata only)\n", i);
+            ECOSMART_LOGI(TAG, "timer_permanent[%zu] stored (metadata only)", i);
             return;
         }
     }
 
     for (size_t i = 0; i < OUTPUTS_NUMBER; i++) {
         if (&reg_module_output.timer_sleep[i] == entry) {
-            Serial.printf("[REG] timer_sleep[%zu] stored (metadata only)\n", i);
+            ECOSMART_LOGI(TAG, "timer_sleep[%zu] stored (metadata only)", i);
             return;
         }
     }

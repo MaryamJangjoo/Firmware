@@ -2,6 +2,9 @@
 
 #include "curtain.hpp"
 #include "Outputs.hpp"
+#include "Logging.h"
+
+static const char* TAG = "CURTAIN";
 
 CurtainRegistryController::CurtainRegistryController(
     OutputsRegistryController& outputs)
@@ -33,12 +36,12 @@ void CurtainRegistryController::onWrite(uint16_t regAddr)
 
         outputs_.applyToHardware();
 
-        Serial.printf("[CURTAIN] State -> %s (open=%d, close=%d)\n",
+        ECOSMART_LOGI(TAG, "State -> %s (open=%d, close=%d)",
                       open ? "OPEN" : "CLOSE",
                       static_cast<int>(open),
                       static_cast<int>(!open));
     } else if (regAddr == REG_ADD_CURTAIN_PERMANENT_TIMER) {
-        Serial.printf("[CURTAIN] Timer stored: %u (metadata only)\n",
+        ECOSMART_LOGI(TAG, "Timer stored: %u (metadata only)",
                       curtain_object.timer_permanent);
     }
 }

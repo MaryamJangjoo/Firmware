@@ -5,9 +5,11 @@
 #include <vector>
 
 #include "mybus_protocol_constants.h"
+#include "Logging.h"
+
+static const char* TAG = "CLOUD";
 
 namespace {
-
 
 String generateDeviceId()
 {
@@ -25,7 +27,7 @@ String generateDeviceId()
     return String(buffer);
 }
 
-} 
+}
 
 CloudManager::CloudManager()
     : httpTransport_(
@@ -55,15 +57,9 @@ CloudManager::CloudManager()
           siteId_
       )
 {
-  
-
     if (!preferences_.begin("cloud", false)) {
-        Serial.println(
-            "[CLOUD] ❌ Preferences begin failed"
-        );
+        ECOSMART_LOGE(TAG, "Preferences begin failed");
     }
-
-
 
     deviceId_ = generateDeviceId();
 
@@ -77,7 +73,7 @@ CloudManager::CloudManager()
         deviceId_ = storedDeviceId;
     }
 
-    mybusSession_.setDeviceId(deviceId_); 
+    mybusSession_.setDeviceId(deviceId_);
 
     mybusDeviceId_ =
         preferences_.getUChar(
@@ -91,7 +87,6 @@ CloudManager::CloudManager()
             0
         );
 
-
     mybusSession_.setInterfaceId(
         mybus_proto::INTERFACE_WIFI
     );
@@ -100,123 +95,47 @@ CloudManager::CloudManager()
         mybusZoneId_
     );
 
-
     jwtToken_ =
         auth_.loadToken();
 
-    mybusSession_.setDeviceId(deviceId_); 
+    mybusSession_.setDeviceId(deviceId_);
 
     if (!mybusSession_.initializeDeviceKeypair()) {
-        Serial.println(
-            "[CLOUD] ❌ Device keypair initialization failed"
-        );
+        ECOSMART_LOGE(TAG, "Device keypair initialization failed");
     }
 
     if (!storage_.init()) {
-
-        Serial.println(
-            "[FS] ❌ Filesystem mount failed"
-        );
-
+        ECOSMART_LOGE(TAG, "Filesystem mount failed");
     } else {
-
         storage_.createDefaultUsersFile();
         storage_.createDefaultSiteInfoFile();
     }
 
-
-    Serial.println();
-    Serial.println(
-        "========================================"
-    );
-
-    Serial.println(
-        "[CLOUD] CloudManager initialized"
-    );
-
-    Serial.println(
-        "========================================"
-    );
-
-    Serial.print(
-        "[CLOUD] Device ID: "
-    );
-
-    Serial.println(
-        deviceId_
-    );
-
-    Serial.print(
-        "[CLOUD] mYBUS Device ID: "
-    );
-
-    Serial.println(
-        mybusDeviceId_
-    );
-
-    Serial.print(
-        "[CLOUD] mYBUS Zone: "
-    );
-
-    Serial.println(
-        mybusZoneId_
-    );
-
-    Serial.print(
-        "[CLOUD] Interface: "
-    );
-
-    Serial.println(
-        mybus_proto::INTERFACE_WIFI
-    );
-
-    Serial.print(
-        "[CLOUD] API URL: "
-    );
-
-    Serial.println(
-        apiBaseUrl_
-    );
-
-    Serial.print(
-        "[CLOUD] Authenticated: "
-    );
-
-    Serial.println(
-        auth_.isLoggedIn()
-            ? "YES"
-            : "NO"
-    );
-
-    Serial.print(
-        "[CLOUD] Secure session: "
-    );
-
-    Serial.println(
-        mybusSession_.isEstablished()
-            ? "✅ ACTIVE"
-            : "❌ NOT ACTIVE"
-    );
+    ECOSMART_LOGI(TAG, "========================================");
+    ECOSMART_LOGI(TAG, "CloudManager initialized");
+    ECOSMART_LOGI(TAG, "========================================");
+    ECOSMART_LOGI(TAG, "Device ID: %s", deviceId_.c_str());
+    ECOSMART_LOGI(TAG, "mYBUS Device ID: %u", static_cast<unsigned>(mybusDeviceId_));
+    ECOSMART_LOGI(TAG, "mYBUS Zone: %u", static_cast<unsigned>(mybusZoneId_));
+    ECOSMART_LOGI(TAG, "Interface: %u", static_cast<unsigned>(mybus_proto::INTERFACE_WIFI));
+    ECOSMART_LOGI(TAG, "API URL: %s", apiBaseUrl_.c_str());
+    ECOSMART_LOGI(TAG, "Authenticated: %s", auth_.isLoggedIn() ? "YES" : "NO");
+    ECOSMART_LOGI(TAG, "Secure session: %s",
+        mybusSession_.isEstablished() ? "ACTIVE" : "NOT ACTIVE");
 
     if (mybusDeviceId_ == 0) {
-        Serial.println(
-            "[CLOUD] ⚠️ mYBUS Device ID is NOT configured"
-        );
+        ECOSMART_LOGW(TAG, "mYBUS Device ID is NOT configured");
     }
 
     if (mybusZoneId_ == 0) {
-        Serial.println(
-            "[CLOUD] ⚠️ mYBUS Zone is NOT configured"
-        );
+        ECOSMART_LOGW(TAG, "mYBUS Zone is NOT configured");
     }
 }
-
 
 CloudManager::~CloudManager()
 {
     preferences_.end();
 }
-
 
 bool CloudManager::loginUser(
     const String& u,
@@ -247,7 +166,6 @@ bool CloudManager::isLoggedIn() const
     return auth_.isLoggedIn();
 }
 
-
 bool CloudManager::loginOffline(
     const String& username,
     const String& password)
@@ -264,28 +182,19 @@ bool CloudManager::loginOffline(
     );
 }
 
-
 bool CloudManager::performHandshake()
 {
-
-
     if (mybusDeviceId_ == 0 ||
         mybusDeviceId_ == 255) {
 
-        Serial.println(
-            "[mYBUS] ❌ Cannot handshake: invalid Device ID"
-        );
-
+        ECOSMART_LOGE(TAG, "Cannot handshake: invalid Device ID");
         return false;
     }
 
     if (mybusZoneId_ == 0 ||
         mybusZoneId_ == 255) {
 
-        Serial.println(
-            "[mYBUS] ❌ Cannot handshake: invalid Zone"
-        );
-
+        ECOSMART_LOGE(TAG, "Cannot handshake: invalid Zone");
         return false;
     }
 
@@ -316,31 +225,21 @@ bool CloudManager::sendMybusData(
     JsonDocument* outResponse)
 {
     if (!mybusSession_.isEstablished()) {
-
-        Serial.println(
-            "[mYBUS] ❌ Secure session not established"
-        );
-
+        ECOSMART_LOGE(TAG, "Secure session not established");
         return false;
     }
 
     if (mybusDeviceId_ == 0 ||
         mybusDeviceId_ == 255) {
 
-        Serial.println(
-            "[mYBUS] ❌ Invalid local mYBUS Device ID"
-        );
-
+        ECOSMART_LOGE(TAG, "Invalid local mYBUS Device ID");
         return false;
     }
 
     if (mybusZoneId_ == 0 ||
         mybusZoneId_ == 255) {
 
-        Serial.println(
-            "[mYBUS] ❌ Invalid local mYBUS Zone"
-        );
-
+        ECOSMART_LOGE(TAG, "Invalid local mYBUS Zone");
         return false;
     }
 
@@ -360,11 +259,7 @@ bool CloudManager::sendRegistryFrame(
     JsonDocument* outResponse)
 {
     if (!mybusSession_.isEstablished()) {
-
-        Serial.println(
-            "[mYBUS] ❌ Secure session not established"
-        );
-
+        ECOSMART_LOGE(TAG, "Secure session not established");
         return false;
     }
 
@@ -376,20 +271,14 @@ bool CloudManager::sendRegistryFrame(
     if (busDeviceId == 0 ||
         busDeviceId == 255) {
 
-        Serial.println(
-            "[mYBUS] ❌ Invalid mYBUS Device ID"
-        );
-
+        ECOSMART_LOGE(TAG, "Invalid mYBUS Device ID");
         return false;
     }
 
     if (mybusZoneId_ == 0 ||
         mybusZoneId_ == 255) {
 
-        Serial.println(
-            "[mYBUS] ❌ Invalid mYBUS Zone"
-        );
-
+        ECOSMART_LOGE(TAG, "Invalid mYBUS Zone");
         return false;
     }
 
@@ -412,18 +301,13 @@ bool CloudManager::sendRegistryFrame(
     );
 }
 
-
 void CloudManager::setMybusDeviceId(
     uint8_t deviceId)
 {
     if (deviceId == 0 ||
         deviceId == 255) {
 
-        Serial.printf(
-            "[mYBUS] ❌ Invalid Device ID: %u\n",
-            static_cast<unsigned>(deviceId)
-        );
-
+        ECOSMART_LOGE(TAG, "Invalid Device ID: %u", static_cast<unsigned>(deviceId));
         return;
     }
 
@@ -435,10 +319,7 @@ void CloudManager::setMybusDeviceId(
         mybusDeviceId_
     );
 
-    Serial.printf(
-        "[mYBUS] ✅ Device ID set to %u\n",
-        static_cast<unsigned>(mybusDeviceId_)
-    );
+    ECOSMART_LOGI(TAG, "Device ID set to %u", static_cast<unsigned>(mybusDeviceId_));
 }
 
 void CloudManager::setMybusZoneId(
@@ -447,11 +328,7 @@ void CloudManager::setMybusZoneId(
     if (zone == 0 ||
         zone == 255) {
 
-        Serial.printf(
-            "[mYBUS] ❌ Invalid Zone: %u\n",
-            static_cast<unsigned>(zone)
-        );
-
+        ECOSMART_LOGE(TAG, "Invalid Zone: %u", static_cast<unsigned>(zone));
         return;
     }
 
@@ -467,10 +344,7 @@ void CloudManager::setMybusZoneId(
         mybusZoneId_
     );
 
-    Serial.printf(
-        "[mYBUS] ✅ Zone set to %u\n",
-        static_cast<unsigned>(mybusZoneId_)
-    );
+    ECOSMART_LOGI(TAG, "Zone set to %u", static_cast<unsigned>(mybusZoneId_));
 }
 
 uint8_t CloudManager::getMybusDeviceId() const
@@ -498,7 +372,6 @@ bool CloudManager::isWebSocketConnected() const
     return wsServer_.isConnected();
 }
 
-
 void CloudManager::onBinaryFrame(CloudWebSocketServer::BinaryFrameCallback cb)
 {
     wsServer_.onBinaryFrame(cb);
@@ -519,10 +392,11 @@ void CloudManager::onShouldSkipMybusWrite(
 }
 
 void CloudManager::onLocalRegistryWrite(
-CloudWebSocketServer::LocalRegistryWriteCallback cb)
+    CloudWebSocketServer::LocalRegistryWriteCallback cb)
 {
-wsServer_.setLocalRegistryWrite(cb);
+    wsServer_.setLocalRegistryWrite(cb);
 }
+
 void CloudManager::setApiBaseUrl(
     const String& url)
 {
@@ -538,13 +412,7 @@ void CloudManager::setApiBaseUrl(
         );
     }
 
-    Serial.print(
-        "[HTTP] API Base URL: "
-    );
-
-    Serial.println(
-        apiBaseUrl_
-    );
+    ECOSMART_LOGI(TAG, "API Base URL: %s", apiBaseUrl_.c_str());
 }
 
 String CloudManager::getApiBaseUrl() const
@@ -566,18 +434,11 @@ void CloudManager::setDeviceId(
         deviceId_
     );
 
-   
     mybusSession_.setDeviceId(
         deviceId_
     );
 
-    Serial.print(
-        "[CLOUD] Device ID changed: "
-    );
-
-    Serial.println(
-        deviceId_
-    );
+    ECOSMART_LOGI(TAG, "Device ID changed: %s", deviceId_.c_str());
 }
 
 String CloudManager::getDeviceId() const
@@ -589,10 +450,6 @@ String CloudManager::getJwtToken() const
 {
     return jwtToken_;
 }
-
-// ============================================================
-// Request number
-// ============================================================
 
 uint32_t CloudManager::nextRequestNumber()
 {

@@ -4,6 +4,10 @@
 #include <HTTPClient.h>
 #include <WiFi.h>
 
+#include "Logging.h"
+
+static const char* TAG = "HTTP";
+
 HttpTransport::HttpTransport(String& apiBaseUrl, String& jwtToken)
     : apiBaseUrl_(apiBaseUrl), jwtToken_(jwtToken)
 {
@@ -22,17 +26,17 @@ String HttpTransport::sendRequest(const String& endpoint, const String& method,
                                    const String& body, bool useAuth)
 {
     if (WiFi.status() != WL_CONNECTED) {
-        Serial.println("[HTTP] WiFi disconnected");
+        ECOSMART_LOGE(TAG, "WiFi disconnected");
         return "";
     }
 
     HTTPClient http;
     String url = apiBaseUrl_ + endpoint;
 
-    Serial.printf("[HTTP] %s %s\n", method.c_str(), url.c_str());
+    ECOSMART_LOGI(TAG, "%s %s", method.c_str(), url.c_str());
 
     if (!http.begin(url)) {
-        Serial.println("[HTTP] begin() failed");
+        ECOSMART_LOGE(TAG, "begin() failed");
         return "";
     }
 
@@ -58,7 +62,7 @@ String HttpTransport::sendRequest(const String& endpoint, const String& method,
             reinterpret_cast<uint8_t*>(const_cast<char*>(body.c_str())),
             body.length());
     } else {
-        Serial.printf("[HTTP] Unsupported method: %s\n", method.c_str());
+        ECOSMART_LOGE(TAG, "Unsupported method: %s", method.c_str());
         http.end();
         return "";
     }
@@ -67,14 +71,14 @@ String HttpTransport::sendRequest(const String& endpoint, const String& method,
     http.end();
 
     if (isHttpSuccess(httpCode)) {
-        Serial.printf("[HTTP] Success: %d\n", httpCode);
+        ECOSMART_LOGI(TAG, "Success: %d", httpCode);
         return response;
     }
 
-    Serial.printf("[HTTP] Request failed: %d\n", httpCode);
+    ECOSMART_LOGE(TAG, "Request failed: %d", httpCode);
     if (!response.isEmpty()) {
-        Serial.println("[HTTP] Response:");
-        Serial.println(response);
+        ECOSMART_LOGI(TAG, "Response:");
+        ECOSMART_LOGI(TAG, "%s", response.c_str());
     }
     return "";
 }
@@ -90,17 +94,17 @@ bool HttpTransport::sendRawBinaryToBackend(const uint8_t* data, size_t len,
     outResponseBytes.clear();
 
     if (WiFi.status() != WL_CONNECTED) {
-        Serial.println("[HTTP] WiFi disconnected");
+        ECOSMART_LOGE(TAG, "WiFi disconnected");
         return false;
     }
 
     HTTPClient http;
     String url = apiBaseUrl_ + "/devices/data";
 
-    Serial.printf("[HTTP] POST %s (%u bytes)\n", url.c_str(), static_cast<unsigned>(len));
+    ECOSMART_LOGI(TAG, "POST %s (%u bytes)", url.c_str(), static_cast<unsigned>(len));
 
     if (!http.begin(url)) {
-        Serial.println("[HTTP] begin() failed");
+        ECOSMART_LOGE(TAG, "begin() failed");
         return false;
     }
 
@@ -115,16 +119,16 @@ bool HttpTransport::sendRawBinaryToBackend(const uint8_t* data, size_t len,
     int httpCode = http.POST(const_cast<uint8_t*>(data), len);
 
     if (!isHttpSuccess(httpCode)) {
-        Serial.printf("[HTTP] Failed: %d\n", httpCode);
+        ECOSMART_LOGE(TAG, "Failed: %d", httpCode);
         String response = http.getString();
         if (!response.isEmpty()) {
-            Serial.println("[HTTP] Response: " + response);
+            ECOSMART_LOGI(TAG, "Response: %s", response.c_str());
         }
         http.end();
         return false;
     }
 
-    Serial.printf("[HTTP] Success: %d\n", httpCode);
+    ECOSMART_LOGI(TAG, "Success: %d", httpCode);
 
     WiFiClient& stream = http.getStream();
     std::vector<uint8_t> responseBuf;
@@ -144,7 +148,7 @@ bool HttpTransport::sendRawBinaryToBackend(const uint8_t* data, size_t len,
         // exactly when the total timeout expires) could keep the loop
         // running indefinitely and starve the watchdog.
         if (millis() - startMs > TOTAL_TIMEOUT_MS) {
-            Serial.println("[HTTP] Response read total timeout exceeded");
+            ECOSMART_LOGW(TAG, "Response read total timeout exceeded");
             totalTimeoutHit = true;
             break;
         }
@@ -162,12 +166,12 @@ bool HttpTransport::sendRawBinaryToBackend(const uint8_t* data, size_t len,
 
     http.end();
 
-    Serial.printf("[HTTP] Response body: %u bytes%s\n",
+    ECOSMART_LOGI(TAG, "Response body: %u bytes%s",
                   static_cast<unsigned>(responseBuf.size()),
                   totalTimeoutHit ? " (truncated by total timeout)" : "");
 
     if (responseBuf.empty()) {
-        Serial.println("[mYBUS] Result: FAILED (empty body)");
+        ECOSMART_LOGE(TAG, "Result: FAILED (empty body)");
         return false;
     }
 
@@ -176,7 +180,7 @@ bool HttpTransport::sendRawBinaryToBackend(const uint8_t* data, size_t len,
 
         JsonDocument jsonDoc;
         if (deserializeJson(jsonDoc, jsonStr) != DeserializationError::Ok) {
-            Serial.println("[mYBUS] JSON response failed to parse");
+            ECOSMART_LOGE(TAG, "JSON response failed to parse");
             return false;
         }
 
@@ -186,7 +190,7 @@ bool HttpTransport::sendRawBinaryToBackend(const uint8_t* data, size_t len,
             for (JsonVariant v : dataArray) {
                 outResponseBytes.push_back(v.as<uint8_t>());
             }
-            Serial.printf("[mYBUS] Extracted %u bytes from JSON Buffer\n",
+            ECOSMART_LOGI(TAG, "Extracted %u bytes from JSON Buffer",
                           static_cast<unsigned>(outResponseBytes.size()));
             return true;
         }

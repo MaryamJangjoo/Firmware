@@ -1,20 +1,24 @@
 #include "LocalRegisterMap.h"
 
+#include "Logging.h"
+
+static const char* TAG = "REGMAP";
+
 bool LocalRegisterMap::bind(const LocalRegisterBinding& binding)
 {
     if (find(binding.addr) != nullptr) {
-        Serial.printf("[REGMAP] ❌ 0x%04X already bound - ignoring duplicate\n", binding.addr);
+        ECOSMART_LOGW(TAG, "0x%04X already bound - ignoring duplicate", binding.addr);
         return false;
     }
 
     if (binding.ptr == nullptr) {
-        Serial.printf("[REGMAP] ❌ null ptr for 0x%04X\n", binding.addr);
+        ECOSMART_LOGE(TAG, "null ptr for 0x%04X", binding.addr);
         return false;
     }
 
     if (!binding.isString) {
         if (binding.size == 0 || binding.size > MAX_FIXED_SIZE) {
-            Serial.printf("[REGMAP] ❌ invalid size (%u) for 0x%04X\n",
+            ECOSMART_LOGE(TAG, "invalid size (%u) for 0x%04X",
                           static_cast<unsigned>(binding.size), binding.addr);
             return false;
         }
@@ -22,7 +26,7 @@ bool LocalRegisterMap::bind(const LocalRegisterBinding& binding)
 
     bindings_.push_back(binding);
 
-    Serial.printf("[REGMAP] ✅ Bound 0x%04X (%s, %s)\n",
+    ECOSMART_LOGI(TAG, "Bound 0x%04X (%s, %s)",
                   binding.addr,
                   binding.isString ? "string" : "fixed",
                   binding.writable ? "R/W" : "R");
@@ -79,7 +83,7 @@ bool LocalRegisterMap::writeValueFromString(uint16_t addr, const String& regVal)
     if (b == nullptr) return false;
 
     if (!b->writable) {
-        Serial.printf("[REGMAP] ❌ 0x%04X is read-only\n", addr);
+        ECOSMART_LOGW(TAG, "0x%04X is read-only", addr);
         return false;
     }
 
@@ -93,12 +97,12 @@ bool LocalRegisterMap::writeValueFromString(uint16_t addr, const String& regVal)
     size_t len = sizeof(buf);
 
     if (!encodeRegValueString(regVal, b->type, buf, sizeof(buf), len)) {
-        Serial.printf("[REGMAP] ❌ Encode failed for 0x%04X: %s\n", addr, regVal.c_str());
+        ECOSMART_LOGE(TAG, "Encode failed for 0x%04X: %s", addr, regVal.c_str());
         return false;
     }
 
     if (len != b->size) {
-        Serial.printf("[REGMAP] ❌ Size mismatch 0x%04X: got %u expected %u\n",
+        ECOSMART_LOGE(TAG, "Size mismatch 0x%04X: got %u expected %u",
                       addr, static_cast<unsigned>(len), static_cast<unsigned>(b->size));
         return false;
     }

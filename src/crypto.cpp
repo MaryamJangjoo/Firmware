@@ -10,6 +10,10 @@
 #include <mbedtls/base64.h>
 #include <mbedtls/pkcs5.h>
 
+#include "Logging.h"
+
+static const char* TAG = "CRYPTO";
+
 // ============================================================
 // Global crypto state
 // ============================================================
@@ -81,10 +85,8 @@ bool cryptoInit() {
 
     if (ret != 0) {
 
-        Serial.printf(
-            "[CRYPTO] DRBG initialization failed: -0x%04X\n",
-            -ret
-        );
+        ECOSMART_LOGE(TAG,
+            "DRBG initialization failed: -0x%04X", -ret);
 
         mbedtls_ctr_drbg_free(&g_ctrDrbg);
         mbedtls_entropy_free(&g_entropy);
@@ -94,7 +96,7 @@ bool cryptoInit() {
 
     g_cryptoInitialized = true;
 
-    Serial.println("[CRYPTO] initialized");
+    ECOSMART_LOGI(TAG, "initialized");
 
     return true;
 }
@@ -144,10 +146,8 @@ bool generateDeviceKeypair(
 
     if (ret != 0) {
 
-        Serial.printf(
-            "[CRYPTO] ECP group load failed: -0x%04X\n",
-            -ret
-        );
+        ECOSMART_LOGE(TAG,
+            "ECP group load failed: -0x%04X", -ret);
 
         mbedtls_ecp_keypair_free(&kp);
 
@@ -164,10 +164,8 @@ bool generateDeviceKeypair(
 
     if (ret != 0) {
 
-        Serial.printf(
-            "[CRYPTO] ECDH key generation failed: -0x%04X\n",
-            -ret
-        );
+        ECOSMART_LOGE(TAG,
+            "ECDH key generation failed: -0x%04X", -ret);
 
         mbedtls_ecp_keypair_free(&kp);
 
@@ -181,10 +179,8 @@ bool generateDeviceKeypair(
 
     if (ret != 0) {
 
-        Serial.printf(
-            "[CRYPTO] Generated public key invalid: -0x%04X\n",
-            -ret
-        );
+        ECOSMART_LOGE(TAG,
+            "Generated public key invalid: -0x%04X", -ret);
 
         mbedtls_ecp_keypair_free(&kp);
 
@@ -231,9 +227,7 @@ bool saveDeviceKeypair(
         false
     )) {
 
-        Serial.println(
-            "[CRYPTO] NVS open for write failed"
-        );
+        ECOSMART_LOGE(TAG, "NVS open for write failed");
 
         cryptoSecureZero(
             privateKey,
@@ -258,16 +252,12 @@ bool saveDeviceKeypair(
 
     if (written != sizeof(privateKey)) {
 
-        Serial.println(
-            "[CRYPTO] Failed to save private key"
-        );
+        ECOSMART_LOGE(TAG, "Failed to save private key");
 
         return false;
     }
 
-    Serial.println(
-        "[CRYPTO] Device private key saved"
-    );
+    ECOSMART_LOGI(TAG, "Device private key saved");
 
     return true;
 }
@@ -293,13 +283,8 @@ bool loadDeviceKeypair(
         true
     )) {
 
-        Serial.println(
-            "[CRYPTO] No key namespace found."
-        );
-
-        Serial.println(
-            "[CRYPTO] Generating new device key."
-        );
+        ECOSMART_LOGW(TAG, "No key namespace found.");
+        ECOSMART_LOGW(TAG, "Generating new device key.");
 
         if (!generateDeviceKeypair(kp)) {
             return false;
@@ -324,13 +309,8 @@ bool loadDeviceKeypair(
 
         g_keyStore.end();
 
-        Serial.println(
-            "[CRYPTO] No valid device key found."
-        );
-
-        Serial.println(
-            "[CRYPTO] Generating new device key."
-        );
+        ECOSMART_LOGW(TAG, "No valid device key found.");
+        ECOSMART_LOGW(TAG, "Generating new device key.");
 
         if (!generateDeviceKeypair(kp)) {
             return false;
@@ -361,9 +341,7 @@ bool loadDeviceKeypair(
             sizeof(privateKey)
         );
 
-        Serial.println(
-            "[CRYPTO] Failed to read private key"
-        );
+        ECOSMART_LOGE(TAG, "Failed to read private key");
 
         return false;
     }
@@ -400,10 +378,8 @@ bool loadDeviceKeypair(
 
     if (ret != 0) {
 
-        Serial.printf(
-            "[CRYPTO] Private key restore failed: -0x%04X\n",
-            -ret
-        );
+        ECOSMART_LOGE(TAG,
+            "Private key restore failed: -0x%04X", -ret);
 
         mbedtls_ecp_keypair_free(&kp);
 
@@ -412,9 +388,7 @@ bool loadDeviceKeypair(
 
     if (mbedtls_mpi_bitlen(&kp.d) == 0) {
 
-        Serial.println(
-            "[CRYPTO] Stored private key is zero"
-        );
+        ECOSMART_LOGE(TAG, "Stored private key is zero");
 
         mbedtls_ecp_keypair_free(&kp);
 
@@ -432,10 +406,8 @@ bool loadDeviceKeypair(
 
     if (ret != 0) {
 
-        Serial.printf(
-            "[CRYPTO] Public key reconstruction failed: -0x%04X\n",
-            -ret
-        );
+        ECOSMART_LOGE(TAG,
+            "Public key reconstruction failed: -0x%04X", -ret);
 
         mbedtls_ecp_keypair_free(&kp);
 
@@ -449,19 +421,15 @@ bool loadDeviceKeypair(
 
     if (ret != 0) {
 
-        Serial.printf(
-            "[CRYPTO] Reconstructed public key invalid: -0x%04X\n",
-            -ret
-        );
+        ECOSMART_LOGE(TAG,
+            "Reconstructed public key invalid: -0x%04X", -ret);
 
         mbedtls_ecp_keypair_free(&kp);
 
         return false;
     }
 
-    Serial.println(
-        "[CRYPTO] Device keypair loaded from NVS"
-    );
+    ECOSMART_LOGI(TAG, "Device keypair loaded from NVS");
 
     return true;
 }
@@ -538,10 +506,8 @@ bool cryptoExportPublicKeyPem(
 
     if (ret != 0) {
 
-        Serial.printf(
-            "[CRYPTO] Public PEM export failed: -0x%04X\n",
-            -ret
-        );
+        ECOSMART_LOGE(TAG,
+            "Public PEM export failed: -0x%04X", -ret);
 
         cryptoSecureZero(
             buffer,
@@ -645,10 +611,8 @@ bool cryptoExportPrivateKeyPem(
 
     if (ret != 0) {
 
-        Serial.printf(
-            "[CRYPTO] Private PEM export failed: -0x%04X\n",
-            -ret
-        );
+        ECOSMART_LOGE(TAG,
+            "Private PEM export failed: -0x%04X", -ret);
 
         cryptoSecureZero(
             buffer,
@@ -747,10 +711,8 @@ bool ecdhShared(
 
     if (ret != 0) {
 
-        Serial.printf(
-            "[CRYPTO] Invalid peer public key: -0x%04X\n",
-            -ret
-        );
+        ECOSMART_LOGE(TAG,
+            "Invalid peer public key: -0x%04X", -ret);
 
         return false;
     }
@@ -770,10 +732,7 @@ bool ecdhShared(
 
     if (ret != 0) {
 
-        Serial.printf(
-            "[CRYPTO] ECDH failed: -0x%04X\n",
-            -ret
-        );
+        ECOSMART_LOGE(TAG, "ECDH failed: -0x%04X", -ret);
 
         mbedtls_mpi_free(&shared);
 
@@ -842,10 +801,8 @@ bool cryptoComputeSharedSecret(
 
     if (ret != 0) {
 
-        Serial.printf(
-            "[CRYPTO] Private PEM parse failed: -0x%04X\n",
-            -ret
-        );
+        ECOSMART_LOGE(TAG,
+            "Private PEM parse failed: -0x%04X", -ret);
 
         mbedtls_pk_free(&privatePk);
         mbedtls_pk_free(&serverPk);
@@ -863,10 +820,8 @@ bool cryptoComputeSharedSecret(
 
     if (ret != 0) {
 
-        Serial.printf(
-            "[CRYPTO] Server public PEM parse failed: -0x%04X\n",
-            -ret
-        );
+        ECOSMART_LOGE(TAG,
+            "Server public PEM parse failed: -0x%04X", -ret);
 
         mbedtls_pk_free(&privatePk);
         mbedtls_pk_free(&serverPk);
@@ -885,9 +840,7 @@ bool cryptoComputeSharedSecret(
         )
     ) {
 
-        Serial.println(
-            "[CRYPTO] Keys are not EC keys"
-        );
+        ECOSMART_LOGE(TAG, "Keys are not EC keys");
 
         mbedtls_pk_free(&privatePk);
         mbedtls_pk_free(&serverPk);
@@ -906,9 +859,7 @@ bool cryptoComputeSharedSecret(
         serverKey->grp.id
     ) {
 
-        Serial.println(
-            "[CRYPTO] Curve mismatch"
-        );
+        ECOSMART_LOGE(TAG, "Curve mismatch");
 
         mbedtls_pk_free(&privatePk);
         mbedtls_pk_free(&serverPk);
@@ -954,7 +905,7 @@ bool cryptoComputeSharedSecret(
 }
 
 // ============================================================
-// HKDF-SHA256 - پیاده‌سازی دستی (RFC 5869)
+// HKDF-SHA256 - Manual implementation (RFC 5869)
 // ============================================================
 
 bool hkdfSha256(
@@ -981,22 +932,15 @@ bool hkdfSha256(
         return false;
     }
 
-    // ✅ رفع باگ بالقوه: بافر داخلی buffer[64 + 256 + 1] در پایین فرض
-    // می‌کند info حداکثر 256 بایت است، اما قبلاً هیچ چک صریحی روی
-    // infoLen وجود نداشت. اگر این تابع در آینده با یک info طولانی‌تر
-    // صدا زده می‌شد، این باعث buffer overflow روی استک می‌شد. الان
-    // به‌جای رفتار نامشخص، به‌صراحت شکست می‌خورد.
     if (infoLen > 256) {
-        Serial.println(
-            "[CRYPTO] hkdfSha256: infoLen too large"
-        );
+        ECOSMART_LOGE(TAG, "hkdfSha256: infoLen too large");
         return false;
     }
 
     // ============================================================
     // STEP 1: HKDF-Extract
     // PRK = HMAC-SHA256(salt, IKM)
-    // اگر salt داده نشده باشد، از 32 بایت صفر استفاده می‌شود
+    // If salt is not provided, 32 zero bytes are used.
     // ============================================================
 
     uint8_t prk[32];
@@ -1031,33 +975,28 @@ bool hkdfSha256(
 
     while (position < outputLen) {
 
-        // ساخت بافر برای HMAC: T(prev) + info + counter
-        uint8_t buffer[64 + 256 + 1]; // 32 + 256 + 1
+        // Buffer for HMAC: T(prev) + info + counter
+        uint8_t buffer[64 + 256 + 1];
         size_t bufferLen = 0;
 
-        // اضافه کردن T قبلی (اگر وجود داشته باشد)
         if (Tlen > 0) {
             memcpy(buffer + bufferLen, T, Tlen);
             bufferLen += Tlen;
         }
 
-        // اضافه کردن info
         if (info != nullptr && infoLen > 0) {
             memcpy(buffer + bufferLen, info, infoLen);
             bufferLen += infoLen;
         }
 
-        // اضافه کردن counter
         buffer[bufferLen++] = counter;
 
-        // محاسبه T(n) = HMAC-SHA256(PRK, buffer)
         if (!hmacSha256(prk, sizeof(prk), buffer, bufferLen, T)) {
             cryptoSecureZero(prk, sizeof(prk));
             cryptoSecureZero(T, sizeof(T));
             return false;
         }
 
-        // کپی به خروجی
         size_t remaining = outputLen - position;
         size_t toCopy = (remaining > sizeof(T)) ? sizeof(T) : remaining;
         memcpy(output + position, T, toCopy);
@@ -1067,7 +1006,6 @@ bool hkdfSha256(
         counter++;
     }
 
-    // پاک کردن اطلاعات حساس
     cryptoSecureZero(prk, sizeof(prk));
     cryptoSecureZero(T, sizeof(T));
 
@@ -1369,7 +1307,7 @@ bool cryptoHexToBytes(
 }
 
 // ============================================================
-// ✅ Base64 - تبدیل bytes به Base64
+// Base64 - bytes to Base64
 // ============================================================
 
 String cryptoBytesToBase64(
@@ -1383,19 +1321,19 @@ String cryptoBytesToBase64(
     size_t outputLen = 0;
     int ret = mbedtls_base64_encode(nullptr, 0, &outputLen, data, length);
     if (ret != MBEDTLS_ERR_BASE64_BUFFER_TOO_SMALL) {
-        Serial.printf("[CRYPTO] Base64 buffer size calc failed: -0x%04X\n", -ret);
+        ECOSMART_LOGE(TAG, "Base64 buffer size calc failed: -0x%04X", -ret);
         return "";
     }
 
     uint8_t* output = new uint8_t[outputLen + 1];
     if (output == nullptr) {
-        Serial.println("[CRYPTO] Base64 memory allocation failed");
+        ECOSMART_LOGE(TAG, "Base64 memory allocation failed");
         return "";
     }
 
     ret = mbedtls_base64_encode(output, outputLen + 1, &outputLen, data, length);
     if (ret != 0) {
-        Serial.printf("[CRYPTO] Base64 encode failed: -0x%04X\n", -ret);
+        ECOSMART_LOGE(TAG, "Base64 encode failed: -0x%04X", -ret);
         delete[] output;
         return "";
     }
@@ -1407,13 +1345,9 @@ String cryptoBytesToBase64(
 }
 
 // ============================================================
-// ✅ Password Hashing (PBKDF2-HMAC-SHA256, format: "saltHex$hashHex")
+// Password Hashing (PBKDF2-HMAC-SHA256, format: "saltHex$hashHex")
 // ============================================================
 
-// هسته‌ی مشترک PBKDF2: با یک salt مشخص، هش را روی password محاسبه
-// می‌کند. هم توسط cryptoHashPassword (با salt تصادفی تازه) و هم
-// توسط cryptoVerifyPassword (با salt استخراج‌شده از رشته‌ی ذخیره‌شده)
-// استفاده می‌شود تا منطق PBKDF2 فقط در یک نقطه وجود داشته باشد.
 static bool pbkdf2Compute(
     const String& password,
     const uint8_t* salt,
@@ -1436,15 +1370,11 @@ static bool pbkdf2Compute(
         return false;
     }
 
-    // آرگومان دوم (hmac) باید 1 باشد تا context برای HMAC آماده شود
-    // (پیش‌نیاز mbedtls_pkcs5_pbkdf2_hmac).
     int ret = mbedtls_md_setup(&ctx, info, 1);
 
     if (ret != 0) {
-        Serial.printf(
-            "[CRYPTO] PBKDF2 md_setup failed: -0x%04X\n",
-            -ret
-        );
+        ECOSMART_LOGE(TAG,
+            "PBKDF2 md_setup failed: -0x%04X", -ret);
         mbedtls_md_free(&ctx);
         return false;
     }
@@ -1463,10 +1393,8 @@ static bool pbkdf2Compute(
     mbedtls_md_free(&ctx);
 
     if (ret != 0) {
-        Serial.printf(
-            "[CRYPTO] PBKDF2 computation failed: -0x%04X\n",
-            -ret
-        );
+        ECOSMART_LOGE(TAG,
+            "PBKDF2 computation failed: -0x%04X", -ret);
         return false;
     }
 
@@ -1482,9 +1410,7 @@ bool cryptoHashPassword(
     outCombined = "";
 
     if (password.isEmpty()) {
-        Serial.println(
-            "[CRYPTO] cryptoHashPassword: empty password"
-        );
+        ECOSMART_LOGE(TAG, "cryptoHashPassword: empty password");
         return false;
     }
 
@@ -1495,9 +1421,7 @@ bool cryptoHashPassword(
     uint8_t salt[PBKDF2_SALT_SIZE];
 
     if (!cryptoRandomBytes(salt, sizeof(salt))) {
-        Serial.println(
-            "[CRYPTO] cryptoHashPassword: salt generation failed"
-        );
+        ECOSMART_LOGE(TAG, "cryptoHashPassword: salt generation failed");
         return false;
     }
 
@@ -1547,9 +1471,8 @@ bool cryptoVerifyPassword(
     const int sep = storedCombined.indexOf(PBKDF2_SEPARATOR);
 
     if (sep <= 0 || sep >= static_cast<int>(storedCombined.length()) - 1) {
-        Serial.println(
-            "[CRYPTO] cryptoVerifyPassword: malformed stored hash (no separator)"
-        );
+        ECOSMART_LOGE(TAG,
+            "cryptoVerifyPassword: malformed stored hash (no separator)");
         return false;
     }
 
@@ -1559,18 +1482,16 @@ bool cryptoVerifyPassword(
     if (saltHex.length() != PBKDF2_SALT_SIZE * 2 ||
         expectedHashHex.length() != PBKDF2_HASH_SIZE * 2) {
 
-        Serial.println(
-            "[CRYPTO] cryptoVerifyPassword: unexpected salt/hash length"
-        );
+        ECOSMART_LOGE(TAG,
+            "cryptoVerifyPassword: unexpected salt/hash length");
         return false;
     }
 
     uint8_t salt[PBKDF2_SALT_SIZE];
 
     if (!cryptoHexToBytes(saltHex, salt, sizeof(salt))) {
-        Serial.println(
-            "[CRYPTO] cryptoVerifyPassword: salt hex decode failed"
-        );
+        ECOSMART_LOGE(TAG,
+            "cryptoVerifyPassword: salt hex decode failed");
         return false;
     }
 
@@ -1597,11 +1518,6 @@ bool cryptoVerifyPassword(
         cryptoBytesToHex(computedHash, sizeof(computedHash));
 
     cryptoSecureZero(computedHash, sizeof(computedHash));
-
-    // ------------------------------------------------------
-    // مقایسه‌ی constant-time (نه ==) برای مقاومت در برابر
-    // timing attack روی طول/محتوای هش.
-    // ------------------------------------------------------
 
     if (computedHashHex.length() != expectedHashHex.length()) {
         return false;

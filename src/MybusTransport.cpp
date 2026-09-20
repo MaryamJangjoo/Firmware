@@ -8,6 +8,9 @@
 #include "mybus_frame.h"
 #include "mybus_registry.h"
 #include "mybus_protocol_constants.h"
+#include "Logging.h"
+
+static const char* TAG = "MYBUS-TRANSPORT";
 
 MybusTransport::MybusTransport(
     HttpTransport& transport,
@@ -27,20 +30,12 @@ bool MybusTransport::validateAddress(
     uint8_t zone) const
 {
     if (deviceId == 0 || deviceId == 255) {
-        Serial.printf(
-            "[mYBUS] Invalid deviceId: %u\n",
-            deviceId
-        );
-
+        ECOSMART_LOGE(TAG, "Invalid deviceId: %u", deviceId);
         return false;
     }
 
     if (zone == 0 || zone == 255) {
-        Serial.printf(
-            "[mYBUS] Invalid zone: %u\n",
-            zone
-        );
-
+        ECOSMART_LOGE(TAG, "Invalid zone: %u", zone);
         return false;
     }
 
@@ -64,31 +59,21 @@ bool MybusTransport::sendMybusBinaryFrame(
     JsonDocument* outResponse)
 {
     if (payloadLen > kMaxPayloadSize) {
-        Serial.printf(
-            "[mYBUS] Payload too large: %u\n",
-            static_cast<unsigned>(payloadLen)
-        );
-
+        ECOSMART_LOGE(TAG, "Payload too large: %u",
+            static_cast<unsigned>(payloadLen));
         return false;
     }
 
     if (!session_.isEstablished()) {
-        Serial.println(
-            "[mYBUS] No secure session"
-        );
-
+        ECOSMART_LOGE(TAG, "No secure session");
         return false;
     }
 
-    if (!validateAddress(
-            deviceId,
-            zone)) {
-
+    if (!validateAddress(deviceId, zone)) {
         return false;
     }
 
-    flags |=
-        (1U << MYBUS_FLAG_SCU_BIT);
+    flags |= (1U << MYBUS_FLAG_SCU_BIT);
 
     MyBusHeader hdr;
 
@@ -101,166 +86,98 @@ bool MybusTransport::sendMybusBinaryFrame(
     hdr.requestNumber   = requestNumber;
     hdr.qos             = qos;
     hdr.options         = options;
-    hdr.flags            = flags;
-    hdr.security         = security;
-    hdr.compression      = compression;
-    hdr.command          = command;
+    hdr.flags           = flags;
+    hdr.security        = security;
+    hdr.compression     = compression;
+    hdr.command         = command;
 
     const size_t maxFrameSize =
-        MYBUS_HEADER_SIZE +
-        kMaxPayloadSize +
-        MYBUS_CRC_SIZE;
+        MYBUS_HEADER_SIZE + kMaxPayloadSize + MYBUS_CRC_SIZE;
 
-    std::vector<uint8_t> plainFrame(
-        maxFrameSize
-    );
-
-    std::vector<uint8_t> ciphertext(
-        maxFrameSize
-    );
+    std::vector<uint8_t> plainFrame(maxFrameSize);
+    std::vector<uint8_t> ciphertext(maxFrameSize);
 
     const size_t plainLen =
         mybus_buildFrame(
-            hdr,
-            payload,
-            payloadLen,
-            plainFrame.data(),
-            plainFrame.size()
-        );
+            hdr, payload, payloadLen,
+            plainFrame.data(), plainFrame.size());
 
     if (plainLen == 0) {
-        Serial.println(
-            "[mYBUS] Frame build failed"
-        );
-
+        ECOSMART_LOGE(TAG, "Frame build failed");
         return false;
     }
 
-    Serial.printf(
-        "[mYBUS] Plain frame (%u bytes): ",
-        static_cast<unsigned>(plainLen)
-    );
-
-    Serial.println(
-        cryptoBytesToHex(
-            plainFrame.data(),
-            plainLen
-        )
-    );
+    ECOSMART_LOGI(TAG, "Plain frame (%u bytes): %s",
+        static_cast<unsigned>(plainLen),
+        cryptoBytesToHex(plainFrame.data(), plainLen).c_str());
 
     uint8_t iv[MYBUS_AES_IV_SIZE] = {0};
     uint8_t tag[MYBUS_AES_TAG_SIZE] = {0};
 
     if (!mybus_encryptFrame(
-            plainFrame.data(),
-            plainLen,
+            plainFrame.data(), plainLen,
             session_.sessionKey(),
-            ciphertext.data(),
-            iv,
-            tag)) {
+            ciphertext.data(), iv, tag)) {
 
-        Serial.println(
-            "[mYBUS] Encryption failed"
-        );
-
+        ECOSMART_LOGE(TAG, "Encryption failed");
         return false;
     }
 
     const size_t wireCapacity =
-        MYBUS_AES_IV_SIZE +
-        plainLen +
-        MYBUS_AES_TAG_SIZE;
+        MYBUS_AES_IV_SIZE + plainLen + MYBUS_AES_TAG_SIZE;
 
-    std::vector<uint8_t> wireMsg(
-        wireCapacity
-    );
+    std::vector<uint8_t> wireMsg(wireCapacity);
 
     const size_t wireLen =
         mybus_packWireMessage(
-            iv,
-            tag,
-            ciphertext.data(),
-            plainLen,
-            wireMsg.data(),
-            wireMsg.size()
-        );
+            iv, tag,
+            ciphertext.data(), plainLen,
+            wireMsg.data(), wireMsg.size());
 
     if (wireLen == 0) {
-        Serial.println(
-            "[mYBUS] Wire packing failed"
-        );
-
+        ECOSMART_LOGE(TAG, "Wire packing failed");
         return false;
     }
 
-    Serial.printf(
-        "[mYBUS] Wire packet (%u bytes): ",
-        static_cast<unsigned>(wireLen)
-    );
-
-    Serial.println(
-        cryptoBytesToHex(
-            wireMsg.data(),
-            wireLen
-        )
-    );
+    ECOSMART_LOGI(TAG, "Wire packet (%u bytes): %s",
+        static_cast<unsigned>(wireLen),
+        cryptoBytesToHex(wireMsg.data(), wireLen).c_str());
 
     std::vector<uint8_t> responseBytes;
     JsonDocument jsonError;
 
     const bool sent =
         transport_.sendRawBinaryToBackend(
-            wireMsg.data(),
-            wireLen,
-            responseBytes,
-            &jsonError
-        );
+            wireMsg.data(), wireLen,
+            responseBytes, &jsonError);
 
     if (!sent) {
-        if (outResponse != nullptr &&
-            jsonError.size() > 0) {
-
+        if (outResponse != nullptr && jsonError.size() > 0) {
             *outResponse = jsonError;
         }
 
-        Serial.println(
-            "[mYBUS] Result: FAILED"
-        );
-
+        ECOSMART_LOGE(TAG, "Result: FAILED");
         return false;
     }
 
-    if (outResponse != nullptr &&
-        !responseBytes.empty()) {
-
+    if (outResponse != nullptr && !responseBytes.empty()) {
         if (!decryptAndParseMybusResponse(
-                responseBytes.data(),
-                responseBytes.size(),
-                deviceId,
-                requestNumber,
+                responseBytes.data(), responseBytes.size(),
+                deviceId, requestNumber,
                 *outResponse)) {
 
-            Serial.println(
-                "[mYBUS] Failed to decrypt/parse response"
-            );
+            ECOSMART_LOGW(TAG, "Failed to decrypt/parse response");
 
             outResponse->clear();
 
             (*outResponse)["rawData"] =
-                cryptoBytesToHex(
-                    responseBytes.data(),
-                    responseBytes.size()
-                );
+                cryptoBytesToHex(responseBytes.data(), responseBytes.size());
 
-            (*outResponse)["rawLength"] =
-                responseBytes.size();
+            (*outResponse)["rawLength"] = responseBytes.size();
         }
     }
 
-    Serial.println(
-        "[mYBUS] Result: SUCCESS"
-    );
-
+    ECOSMART_LOGI(TAG, "Result: SUCCESS");
     return true;
 }
 
@@ -272,76 +189,39 @@ bool MybusTransport::decryptAndParseMybusResponse(
     JsonDocument& outDoc)
 {
     if (!session_.isEstablished()) {
-        Serial.println(
-            "[mYBUS] No secure session"
-        );
-
+        ECOSMART_LOGE(TAG, "No secure session");
         return false;
     }
 
     const size_t minimumWireLen =
-        MYBUS_AES_IV_SIZE +
-        MYBUS_MIN_FRAME_SIZE +
-        MYBUS_AES_TAG_SIZE;
+        MYBUS_AES_IV_SIZE + MYBUS_MIN_FRAME_SIZE + MYBUS_AES_TAG_SIZE;
 
-    if (wireData == nullptr ||
-        wireLen < minimumWireLen) {
-
-        Serial.printf(
-            "[mYBUS] Response too short: %u\n",
-            static_cast<unsigned>(wireLen)
-        );
-
+    if (wireData == nullptr || wireLen < minimumWireLen) {
+        ECOSMART_LOGE(TAG, "Response too short: %u",
+            static_cast<unsigned>(wireLen));
         return false;
     }
 
-    const uint8_t* iv =
-        wireData;
-
-    const uint8_t* cipher =
-        wireData +
-        MYBUS_AES_IV_SIZE;
-
+    const uint8_t* iv = wireData;
+    const uint8_t* cipher = wireData + MYBUS_AES_IV_SIZE;
     const size_t cipherLen =
-        wireLen -
-        MYBUS_AES_IV_SIZE -
-        MYBUS_AES_TAG_SIZE;
+        wireLen - MYBUS_AES_IV_SIZE - MYBUS_AES_TAG_SIZE;
+    const uint8_t* tag = wireData + MYBUS_AES_IV_SIZE + cipherLen;
 
-    const uint8_t* tag =
-        wireData +
-        MYBUS_AES_IV_SIZE +
-        cipherLen;
-
-    std::vector<uint8_t> plainFrame(
-        cipherLen
-    );
+    std::vector<uint8_t> plainFrame(cipherLen);
 
     if (!mybus_decryptFrame(
-            cipher,
-            cipherLen,
+            cipher, cipherLen,
             session_.sessionKey(),
-            iv,
-            tag,
-            plainFrame.data())) {
+            iv, tag, plainFrame.data())) {
 
-        Serial.println(
-            "[mYBUS] Response GCM authentication failed"
-        );
-
+        ECOSMART_LOGE(TAG, "Response GCM authentication failed");
         return false;
     }
 
-    Serial.printf(
-        "[mYBUS] Response plain frame (%u bytes): ",
-        static_cast<unsigned>(plainFrame.size())
-    );
-
-    Serial.println(
-        cryptoBytesToHex(
-            plainFrame.data(),
-            plainFrame.size()
-        )
-    );
+    ECOSMART_LOGI(TAG, "Response plain frame (%u bytes): %s",
+        static_cast<unsigned>(plainFrame.size()),
+        cryptoBytesToHex(plainFrame.data(), plainFrame.size()).c_str());
 
     MyBusHeader hdr;
 
@@ -350,120 +230,69 @@ bool MybusTransport::decryptAndParseMybusResponse(
     MyBusFrameError frameErr;
 
     if (!mybus_validateFrame(
-            plainFrame.data(),
-            plainFrame.size(),
+            plainFrame.data(), plainFrame.size(),
             session_.interfaceId(),
             static_cast<int>(session_.zone()),
-            MYBUS_ALLOWED_COMMANDS,
-            MYBUS_ALLOWED_COMMANDS_COUNT,
-            hdr,
-            &payload,
-            &payloadLen,
-            frameErr)) {
+            MYBUS_ALLOWED_COMMANDS, MYBUS_ALLOWED_COMMANDS_COUNT,
+            hdr, &payload, &payloadLen, frameErr)) {
 
-        Serial.printf(
-            "[mYBUS] Response frame invalid: %s\n",
-            mybus_frameErrorToString(frameErr)
-        );
-
+        ECOSMART_LOGE(TAG, "Response frame invalid: %s",
+            mybus_frameErrorToString(frameErr));
         return false;
     }
 
     if ((hdr.flags & (1U << MYBUS_FLAG_RSP_BIT)) == 0) {
-        Serial.println(
-            "[mYBUS] Response frame has no RSP flag"
-        );
-
+        ECOSMART_LOGE(TAG, "Response frame has no RSP flag");
         return false;
     }
 
     if (hdr.interfaceId != session_.interfaceId()) {
-        Serial.printf(
-            "[mYBUS] Response interface mismatch: %u\n",
-            hdr.interfaceId
-        );
-
+        ECOSMART_LOGE(TAG, "Response interface mismatch: %u", hdr.interfaceId);
         return false;
     }
 
     if (hdr.zone != session_.zone()) {
-        Serial.printf(
-            "[mYBUS] Response zone mismatch: %u\n",
-            hdr.zone
-        );
-
+        ECOSMART_LOGE(TAG, "Response zone mismatch: %u", hdr.zone);
         return false;
     }
 
     if (hdr.deviceId != expectedDeviceId) {
-        Serial.printf(
-            "[mYBUS] Response deviceId mismatch: got %u, expected %u\n",
-            hdr.deviceId,
-            expectedDeviceId
-        );
-
+        ECOSMART_LOGE(TAG,
+            "Response deviceId mismatch: got %u, expected %u",
+            hdr.deviceId, expectedDeviceId);
         return false;
     }
 
     if (hdr.requestNumber != expectedRequestNumber) {
-        Serial.printf(
-            "[mYBUS] Response requestNumber mismatch: got %u, expected %u\n",
-            hdr.requestNumber,
-            expectedRequestNumber
-        );
-
+        ECOSMART_LOGE(TAG,
+            "Response requestNumber mismatch: got %u, expected %u",
+            hdr.requestNumber, expectedRequestNumber);
         return false;
     }
 
     const bool responseSuccess =
-        (hdr.flags &
-         (1U << MYBUS_FLAG_SF_BIT)) == 0;
+        (hdr.flags & (1U << MYBUS_FLAG_SF_BIT)) == 0;
 
     outDoc.clear();
 
-    outDoc["protocolVersion"] =
-        hdr.protocolVersion;
-
-    outDoc["interface"] =
-        hdr.interfaceId;
-
-    outDoc["zone"] =
-        hdr.zone;
-
-    outDoc["deviceId"] =
-        hdr.deviceId;
-
-    outDoc["command"] =
-        hdr.command;
-
-    outDoc["flags"] =
-        hdr.flags;
-
-    outDoc["security"] =
-        hdr.security;
-
-    outDoc["requestNumber"] =
-        hdr.requestNumber;
-
-    outDoc["success"] =
-        responseSuccess;
-
-    outDoc["payloadLen"] =
-        payloadLen;
+    outDoc["protocolVersion"] = hdr.protocolVersion;
+    outDoc["interface"]       = hdr.interfaceId;
+    outDoc["zone"]            = hdr.zone;
+    outDoc["deviceId"]        = hdr.deviceId;
+    outDoc["command"]         = hdr.command;
+    outDoc["flags"]           = hdr.flags;
+    outDoc["security"]        = hdr.security;
+    outDoc["requestNumber"]   = hdr.requestNumber;
+    outDoc["success"]         = responseSuccess;
+    outDoc["payloadLen"]      = payloadLen;
 
     if (payloadLen > 0) {
         outDoc["payloadHex"] =
-            cryptoBytesToHex(
-                payload,
-                payloadLen
-            );
+            cryptoBytesToHex(payload, payloadLen);
     }
 
-    if (!responseSuccess &&
-        payloadLen == 1) {
-
-        outDoc["errorCode"] =
-            payload[0];
+    if (!responseSuccess && payloadLen == 1) {
+        outDoc["errorCode"] = payload[0];
     }
 
     return true;
@@ -475,9 +304,7 @@ void MybusTransport::decodeRegistryResponseValue(
 {
     doc["regAddr"] = regAddr;
 
-    const bool success =
-        doc["success"] | false;
-
+    const bool success = doc["success"] | false;
     if (!success) {
         return;
     }
@@ -486,31 +313,21 @@ void MybusTransport::decodeRegistryResponseValue(
         return;
     }
 
-    const String hex =
-        doc["payloadHex"].as<String>();
+    const String hex = doc["payloadHex"].as<String>();
 
-    if (hex.isEmpty() ||
-        (hex.length() % 2) != 0) {
-
+    if (hex.isEmpty() || (hex.length() % 2) != 0) {
         return;
     }
 
-    const size_t valueLen =
-        hex.length() / 2;
+    const size_t valueLen = hex.length() / 2;
 
-    if (valueLen == 0 ||
-        valueLen > kMaxPayloadSize) {
-
+    if (valueLen == 0 || valueLen > kMaxPayloadSize) {
         return;
     }
 
     uint8_t value[kMaxPayloadSize];
 
-    if (!cryptoHexToBytes(
-            hex,
-            value,
-            valueLen)) {
-
+    if (!cryptoHexToBytes(hex, value, valueLen)) {
         return;
     }
 
@@ -538,28 +355,20 @@ void MybusTransport::decodeRegistryResponseValue(
 
         case DT_BIT:
             if (valueLen >= 1) {
-                doc["value"] =
-                    (value[0] != 0);
+                doc["value"] = (value[0] != 0);
             }
             break;
 
         case DT_UINT8:
             if (valueLen >= sizeof(uint8_t)) {
-                doc["value"] =
-                    value[0];
+                doc["value"] = value[0];
             }
             break;
 
         case DT_UINT16:
             if (valueLen >= sizeof(uint16_t)) {
                 uint16_t v;
-
-                memcpy(
-                    &v,
-                    value,
-                    sizeof(v)
-                );
-
+                memcpy(&v, value, sizeof(v));
                 doc["value"] = v;
             }
             break;
@@ -567,13 +376,7 @@ void MybusTransport::decodeRegistryResponseValue(
         case DT_UINT32:
             if (valueLen >= sizeof(uint32_t)) {
                 uint32_t v;
-
-                memcpy(
-                    &v,
-                    value,
-                    sizeof(v)
-                );
-
+                memcpy(&v, value, sizeof(v));
                 doc["value"] = v;
             }
             break;
@@ -581,13 +384,7 @@ void MybusTransport::decodeRegistryResponseValue(
         case DT_INT8:
             if (valueLen >= sizeof(int8_t)) {
                 int8_t v;
-
-                memcpy(
-                    &v,
-                    value,
-                    sizeof(v)
-                );
-
+                memcpy(&v, value, sizeof(v));
                 doc["value"] = v;
             }
             break;
@@ -595,13 +392,7 @@ void MybusTransport::decodeRegistryResponseValue(
         case DT_INT16:
             if (valueLen >= sizeof(int16_t)) {
                 int16_t v;
-
-                memcpy(
-                    &v,
-                    value,
-                    sizeof(v)
-                );
-
+                memcpy(&v, value, sizeof(v));
                 doc["value"] = v;
             }
             break;
@@ -609,13 +400,7 @@ void MybusTransport::decodeRegistryResponseValue(
         case DT_INT32:
             if (valueLen >= sizeof(int32_t)) {
                 int32_t v;
-
-                memcpy(
-                    &v,
-                    value,
-                    sizeof(v)
-                );
-
+                memcpy(&v, value, sizeof(v));
                 doc["value"] = v;
             }
             break;
@@ -623,13 +408,7 @@ void MybusTransport::decodeRegistryResponseValue(
         case DT_FLOAT:
             if (valueLen >= sizeof(float)) {
                 float v;
-
-                memcpy(
-                    &v,
-                    value,
-                    sizeof(v)
-                );
-
+                memcpy(&v, value, sizeof(v));
                 doc["value"] = v;
             }
             break;
@@ -639,19 +418,10 @@ void MybusTransport::decodeRegistryResponseValue(
         case DT_STRUCT:
         default: {
             String s;
+            s.reserve(valueLen + 1);
 
-            s.reserve(
-                valueLen + 1
-            );
-
-            for (size_t i = 0;
-                 i < valueLen;
-                 ++i) {
-
-                s +=
-                    static_cast<char>(
-                        value[i]
-                    );
+            for (size_t i = 0; i < valueLen; ++i) {
+                s += static_cast<char>(value[i]);
             }
 
             doc["value"] = s;
@@ -670,83 +440,45 @@ bool MybusTransport::sendRegistryFrame(
     JsonDocument* outResponse)
 {
     if (!session_.isEstablished()) {
-        Serial.println(
-            "[mYBUS] No secure session"
-        );
-
+        ECOSMART_LOGE(TAG, "No secure session");
         return false;
     }
 
-    if (busDeviceId == 0 ||
-        busDeviceId == 255) {
-
-        Serial.printf(
-            "[mYBUS] Invalid busDeviceId: %u\n",
-            busDeviceId
-        );
-
+    if (busDeviceId == 0 || busDeviceId == 255) {
+        ECOSMART_LOGE(TAG, "Invalid busDeviceId: %u", busDeviceId);
         return false;
     }
 
-    if (valueLen >
-        kMaxPayloadSize - 2) {
-
-        Serial.printf(
-            "[mYBUS] Registry value too large: %u\n",
-            static_cast<unsigned>(valueLen)
-        );
-
+    if (valueLen > kMaxPayloadSize - 2) {
+        ECOSMART_LOGE(TAG, "Registry value too large: %u",
+            static_cast<unsigned>(valueLen));
         return false;
     }
 
     if (isWrite && valueLen == 0) {
-        Serial.println(
-            "[mYBUS] isWrite=true but valueLen is zero"
-        );
-
+        ECOSMART_LOGE(TAG, "isWrite=true but valueLen is zero");
         return false;
     }
 
     if (!isWrite && valueLen != 0) {
-        Serial.println(
-            "[mYBUS] isWrite=false but valueLen is non-zero (Read must not carry a value)"
-        );
-
+        ECOSMART_LOGE(TAG,
+            "isWrite=false but valueLen is non-zero (Read must not carry a value)");
         return false;
     }
 
-    const size_t payloadLen =
-        2 + valueLen;
+    const size_t payloadLen = 2 + valueLen;
 
-    std::vector<uint8_t> payload(
-        payloadLen
-    );
+    std::vector<uint8_t> payload(payloadLen);
 
-    payload[0] =
-        static_cast<uint8_t>(
-            regAddr & 0xFFU
-        );
+    payload[0] = static_cast<uint8_t>(regAddr & 0xFFU);
+    payload[1] = static_cast<uint8_t>((regAddr >> 8U) & 0xFFU);
 
-    payload[1] =
-        static_cast<uint8_t>(
-            (regAddr >> 8U) & 0xFFU
-        );
-
-    if (valueLen > 0 &&
-        regValue != nullptr) {
-
-        memcpy(
-            payload.data() + 2,
-            regValue,
-            valueLen
-        );
+    if (valueLen > 0 && regValue != nullptr) {
+        memcpy(payload.data() + 2, regValue, valueLen);
     }
 
-    uint8_t flags =
-        mybus_proto::FLAG_REQUEST;
-
-    flags |=
-        (1U << MYBUS_FLAG_SCU_BIT);
+    uint8_t flags = mybus_proto::FLAG_REQUEST;
+    flags |= (1U << MYBUS_FLAG_SCU_BIT);
 
     const uint8_t command =
         isWrite ? mybus_proto::COMMAND_WRITE_REGISTRY
@@ -758,9 +490,7 @@ bool MybusTransport::sendRegistryFrame(
             session_.interfaceId(),
             session_.zone(),
             busDeviceId,
-            static_cast<uint16_t>(
-                requestNumber & 0xFFFFU
-            ),
+            static_cast<uint16_t>(requestNumber & 0xFFFFU),
             mybus_proto::QOS_DEFAULT,
             mybus_proto::OPTIONS_DEFAULT,
             flags,
@@ -772,13 +502,8 @@ bool MybusTransport::sendRegistryFrame(
             outResponse
         );
 
-    if (ok &&
-        outResponse != nullptr) {
-
-        decodeRegistryResponseValue(
-            *outResponse,
-            regAddr
-        );
+    if (ok && outResponse != nullptr) {
+        decodeRegistryResponseValue(*outResponse, regAddr);
     }
 
     return ok;
@@ -790,29 +515,16 @@ bool MybusTransport::sendMybusData(
     JsonDocument* outResponse)
 {
     if (!session_.isEstablished()) {
-        Serial.println(
-            "[mYBUS] No secure session"
-        );
-
+        ECOSMART_LOGE(TAG, "No secure session");
         return false;
     }
 
-    const uint16_t regAddr =
-        data["RegAdd"] | 0;
+    const uint16_t regAddr = data["RegAdd"] | 0;
+    const String regVal = data["RegVal"] | "";
+    const uint8_t busDeviceId = data["DeviceId"] | 0;
 
-    const String regVal =
-        data["RegVal"] | "";
-
-    const uint8_t busDeviceId =
-        data["DeviceId"] | 0;
-
-    if (busDeviceId == 0 ||
-        busDeviceId == 255) {
-
-        Serial.println(
-            "[mYBUS] Invalid DeviceId"
-        );
-
+    if (busDeviceId == 0 || busDeviceId == 255) {
+        ECOSMART_LOGE(TAG, "Invalid DeviceId");
         return false;
     }
 
@@ -820,9 +532,7 @@ bool MybusTransport::sendMybusData(
     size_t valueLen = 0;
 
     const MyBusDataType dataType =
-        static_cast<MyBusDataType>(
-            (regAddr >> 8) & 0x0F
-        );
+        static_cast<MyBusDataType>((regAddr >> 8) & 0x0F);
 
     if (!regVal.isEmpty()) {
 
@@ -830,312 +540,148 @@ bool MybusTransport::sendMybusData(
 
             case DT_FLOAT: {
                 char* endPtr = nullptr;
-
-                const float f =
-                    strtof(
-                        regVal.c_str(),
-                        &endPtr
-                    );
+                const float f = strtof(regVal.c_str(), &endPtr);
 
                 if (endPtr == regVal.c_str() ||
-                    (endPtr != nullptr &&
-                     *endPtr != '\0')) {
-
-                    Serial.printf(
-                        "[mYBUS] Invalid float: %s\n",
-                        regVal.c_str()
-                    );
-
+                    (endPtr != nullptr && *endPtr != '\0')) {
+                    ECOSMART_LOGE(TAG, "Invalid float: %s", regVal.c_str());
                     return false;
                 }
 
-                memcpy(
-                    value,
-                    &f,
-                    sizeof(float)
-                );
-
-                valueLen =
-                    sizeof(float);
-
+                memcpy(value, &f, sizeof(float));
+                valueLen = sizeof(float);
                 break;
             }
 
             case DT_UINT32: {
                 char* endPtr = nullptr;
-
-                const unsigned long num =
-                    strtoul(
-                        regVal.c_str(),
-                        &endPtr,
-                        10
-                    );
+                const unsigned long num = strtoul(regVal.c_str(), &endPtr, 10);
 
                 if (endPtr == regVal.c_str() ||
-                    (endPtr != nullptr &&
-                     *endPtr != '\0')) {
-
-                    Serial.printf(
-                        "[mYBUS] Invalid uint32: %s\n",
-                        regVal.c_str()
-                    );
-
+                    (endPtr != nullptr && *endPtr != '\0')) {
+                    ECOSMART_LOGE(TAG, "Invalid uint32: %s", regVal.c_str());
                     return false;
                 }
 
-                const uint32_t num32 =
-                    static_cast<uint32_t>(num);
-
-                memcpy(
-                    value,
-                    &num32,
-                    sizeof(num32)
-                );
-
-                valueLen =
-                    sizeof(num32);
-
+                const uint32_t num32 = static_cast<uint32_t>(num);
+                memcpy(value, &num32, sizeof(num32));
+                valueLen = sizeof(num32);
                 break;
             }
 
             case DT_INT32: {
                 char* endPtr = nullptr;
-
-                const long num =
-                    strtol(
-                        regVal.c_str(),
-                        &endPtr,
-                        10
-                    );
+                const long num = strtol(regVal.c_str(), &endPtr, 10);
 
                 if (endPtr == regVal.c_str() ||
-                    (endPtr != nullptr &&
-                     *endPtr != '\0')) {
-
-                    Serial.printf(
-                        "[mYBUS] Invalid int32: %s\n",
-                        regVal.c_str()
-                    );
-
+                    (endPtr != nullptr && *endPtr != '\0')) {
+                    ECOSMART_LOGE(TAG, "Invalid int32: %s", regVal.c_str());
                     return false;
                 }
 
-                const int32_t num32 =
-                    static_cast<int32_t>(num);
-
-                memcpy(
-                    value,
-                    &num32,
-                    sizeof(num32)
-                );
-
-                valueLen =
-                    sizeof(num32);
-
+                const int32_t num32 = static_cast<int32_t>(num);
+                memcpy(value, &num32, sizeof(num32));
+                valueLen = sizeof(num32);
                 break;
             }
 
             case DT_UINT16: {
                 char* endPtr = nullptr;
-
-                const long num =
-                    strtol(
-                        regVal.c_str(),
-                        &endPtr,
-                        10
-                    );
+                const long num = strtol(regVal.c_str(), &endPtr, 10);
 
                 if (endPtr == regVal.c_str() ||
-                    (endPtr != nullptr &&
-                     *endPtr != '\0') ||
-                    num < 0 ||
-                    num > 0xFFFFL) {
-
-                    Serial.printf(
-                        "[mYBUS] Invalid uint16: %s\n",
-                        regVal.c_str()
-                    );
-
+                    (endPtr != nullptr && *endPtr != '\0') ||
+                    num < 0 || num > 0xFFFFL) {
+                    ECOSMART_LOGE(TAG, "Invalid uint16: %s", regVal.c_str());
                     return false;
                 }
 
-                const uint16_t num16 =
-                    static_cast<uint16_t>(num);
-
-                memcpy(
-                    value,
-                    &num16,
-                    sizeof(num16)
-                );
-
-                valueLen =
-                    sizeof(num16);
-
+                const uint16_t num16 = static_cast<uint16_t>(num);
+                memcpy(value, &num16, sizeof(num16));
+                valueLen = sizeof(num16);
                 break;
             }
 
             case DT_INT16: {
                 char* endPtr = nullptr;
-
-                const long num =
-                    strtol(
-                        regVal.c_str(),
-                        &endPtr,
-                        10
-                    );
+                const long num = strtol(regVal.c_str(), &endPtr, 10);
 
                 if (endPtr == regVal.c_str() ||
-                    (endPtr != nullptr &&
-                     *endPtr != '\0') ||
-                    num < -32768L ||
-                    num > 32767L) {
-
-                    Serial.printf(
-                        "[mYBUS] Invalid int16: %s\n",
-                        regVal.c_str()
-                    );
-
+                    (endPtr != nullptr && *endPtr != '\0') ||
+                    num < -32768L || num > 32767L) {
+                    ECOSMART_LOGE(TAG, "Invalid int16: %s", regVal.c_str());
                     return false;
                 }
 
-                const int16_t num16 =
-                    static_cast<int16_t>(num);
-
-                memcpy(
-                    value,
-                    &num16,
-                    sizeof(num16)
-                );
-
-                valueLen =
-                    sizeof(num16);
-
+                const int16_t num16 = static_cast<int16_t>(num);
+                memcpy(value, &num16, sizeof(num16));
+                valueLen = sizeof(num16);
                 break;
             }
 
             case DT_UINT8: {
                 char* endPtr = nullptr;
-
-                const long num =
-                    strtol(
-                        regVal.c_str(),
-                        &endPtr,
-                        10
-                    );
+                const long num = strtol(regVal.c_str(), &endPtr, 10);
 
                 if (endPtr == regVal.c_str() ||
-                    (endPtr != nullptr &&
-                     *endPtr != '\0') ||
-                    num < 0 ||
-                    num > 255) {
-
-                    Serial.printf(
-                        "[mYBUS] Invalid uint8: %s\n",
-                        regVal.c_str()
-                    );
-
+                    (endPtr != nullptr && *endPtr != '\0') ||
+                    num < 0 || num > 255) {
+                    ECOSMART_LOGE(TAG, "Invalid uint8: %s", regVal.c_str());
                     return false;
                 }
 
-                value[0] =
-                    static_cast<uint8_t>(num);
-
+                value[0] = static_cast<uint8_t>(num);
                 valueLen = 1;
-
                 break;
             }
 
             case DT_INT8: {
                 char* endPtr = nullptr;
-
-                const long num =
-                    strtol(
-                        regVal.c_str(),
-                        &endPtr,
-                        10
-                    );
+                const long num = strtol(regVal.c_str(), &endPtr, 10);
 
                 if (endPtr == regVal.c_str() ||
-                    (endPtr != nullptr &&
-                     *endPtr != '\0') ||
-                    num < -128L ||
-                    num > 127L) {
-
-                    Serial.printf(
-                        "[mYBUS] Invalid int8: %s\n",
-                        regVal.c_str()
-                    );
-
+                    (endPtr != nullptr && *endPtr != '\0') ||
+                    num < -128L || num > 127L) {
+                    ECOSMART_LOGE(TAG, "Invalid int8: %s", regVal.c_str());
                     return false;
                 }
 
-                value[0] =
-                    static_cast<uint8_t>(
-                        static_cast<int8_t>(num)
-                    );
-
+                value[0] = static_cast<uint8_t>(static_cast<int8_t>(num));
                 valueLen = 1;
-
                 break;
             }
 
             case DT_BIT: {
                 const bool isTrue =
-                    regVal.equalsIgnoreCase("true") ||
-                    regVal == "1";
+                    regVal.equalsIgnoreCase("true") || regVal == "1";
 
                 const bool isFalse =
-                    regVal.equalsIgnoreCase("false") ||
-                    regVal == "0";
+                    regVal.equalsIgnoreCase("false") || regVal == "0";
 
                 if (!isTrue && !isFalse) {
-                    Serial.printf(
-                        "[mYBUS] Invalid bool: %s\n",
-                        regVal.c_str()
-                    );
-
+                    ECOSMART_LOGE(TAG, "Invalid bool: %s", regVal.c_str());
                     return false;
                 }
 
-                value[0] =
-                    isTrue ? 1 : 0;
-
+                value[0] = isTrue ? 1 : 0;
                 valueLen = 1;
-
                 break;
             }
 
             case DT_STRING:
             default: {
-                valueLen =
-                    min(
-                        regVal.length(),
-                        sizeof(value)
-                    );
-
-                memcpy(
-                    value,
-                    regVal.c_str(),
-                    valueLen
-                );
-
+                valueLen = min(regVal.length(), sizeof(value));
+                memcpy(value, regVal.c_str(), valueLen);
                 break;
             }
         }
     }
 
-    const bool isWrite =
-        !regVal.isEmpty();
+    const bool isWrite = !regVal.isEmpty();
 
     return sendRegistryFrame(
-        regAddr,
-        value,
-        valueLen,
-        isWrite,
-        busDeviceId,
-        requestNumber,
-        outResponse
-    );
+        regAddr, value, valueLen, isWrite,
+        busDeviceId, requestNumber, outResponse);
 }
 
 bool MybusTransport::buildControlFrame(
@@ -1149,17 +695,13 @@ bool MybusTransport::buildControlFrame(
     outWire.clear();
 
     if (payloadLen > kMaxPayloadSize) {
-        Serial.printf(
-            "[mYBUS-WS] Payload too large: %u\n",
-            static_cast<unsigned>(payloadLen)
-        );
+        ECOSMART_LOGE(TAG, "Payload too large: %u",
+            static_cast<unsigned>(payloadLen));
         return false;
     }
 
     if (!session_.isEstablished()) {
-        Serial.println(
-            "[mYBUS-WS] No secure session"
-        );
+        ECOSMART_LOGE(TAG, "No secure session");
         return false;
     }
 
@@ -1188,10 +730,11 @@ bool MybusTransport::buildControlFrame(
     std::vector<uint8_t> ciphertext(maxFrameSize);
 
     const size_t plainLen = mybus_buildFrame(
-        hdr, payload, payloadLen, plainFrame.data(), plainFrame.size());
+        hdr, payload, payloadLen,
+        plainFrame.data(), plainFrame.size());
 
     if (plainLen == 0) {
-        Serial.println("[mYBUS-WS] Frame build failed");
+        ECOSMART_LOGE(TAG, "Frame build failed");
         return false;
     }
 
@@ -1202,7 +745,7 @@ bool MybusTransport::buildControlFrame(
             plainFrame.data(), plainLen,
             session_.sessionKey(),
             ciphertext.data(), iv, tag)) {
-        Serial.println("[mYBUS-WS] Encryption failed");
+        ECOSMART_LOGE(TAG, "Encryption failed");
         return false;
     }
 
@@ -1216,7 +759,7 @@ bool MybusTransport::buildControlFrame(
         outWire.data(), outWire.size());
 
     if (wireLen == 0) {
-        Serial.println("[mYBUS-WS] Wire packing failed");
+        ECOSMART_LOGE(TAG, "Wire packing failed");
         outWire.clear();
         return false;
     }
@@ -1238,7 +781,7 @@ bool MybusTransport::parseControlFrame(
     outError = MyBusFrameError::NONE;
 
     if (!session_.isEstablished()) {
-        Serial.println("[mYBUS-WS] No secure session");
+        ECOSMART_LOGE(TAG, "No secure session");
         return false;
     }
 
@@ -1246,10 +789,8 @@ bool MybusTransport::parseControlFrame(
         MYBUS_AES_IV_SIZE + MYBUS_MIN_FRAME_SIZE + MYBUS_AES_TAG_SIZE;
 
     if (wireData == nullptr || wireLen < minimumWireLen) {
-        Serial.printf(
-            "[mYBUS-WS] Frame too short: %u\n",
-            static_cast<unsigned>(wireLen)
-        );
+        ECOSMART_LOGE(TAG, "Frame too short: %u",
+            static_cast<unsigned>(wireLen));
         return false;
     }
 
@@ -1264,7 +805,7 @@ bool MybusTransport::parseControlFrame(
             cipher, cipherLen,
             session_.sessionKey(),
             iv, tag, plainFrame.data())) {
-        Serial.println("[mYBUS-WS] GCM authentication failed");
+        ECOSMART_LOGE(TAG, "GCM authentication failed");
         return false;
     }
 
@@ -1276,10 +817,8 @@ bool MybusTransport::parseControlFrame(
             session_.interfaceId(), static_cast<int>(session_.zone()),
             allowedCommands, allowedCommandsCount,
             outHdr, &payload, &payloadLen, outError)) {
-        Serial.printf(
-            "[mYBUS-WS] Frame invalid: %s\n",
-            mybus_frameErrorToString(outError)
-        );
+        ECOSMART_LOGE(TAG, "Frame invalid: %s",
+            mybus_frameErrorToString(outError));
         return false;
     }
 

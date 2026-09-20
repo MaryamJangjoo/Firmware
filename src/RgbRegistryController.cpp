@@ -1,6 +1,9 @@
 #include "RgbRegistryController.h"
 
 #include "rgb.hpp"
+#include "Logging.h"
+
+static const char* TAG = "RGB";
 
 RgbRegistryController::RgbRegistryController(
     CRGB* leds,
@@ -35,7 +38,7 @@ void RgbRegistryController::applyToHardware()
     // fix is planned.
 
     if (rgb_object.mode == 0) {
-        Serial.println("[RGB] mode=OFF");
+        ECOSMART_LOGI(TAG, "mode=OFF");
         fill_solid(leds_, numLeds_, CRGB::Black);
         FastLED.show();
         return;
@@ -48,7 +51,7 @@ void RgbRegistryController::applyToHardware()
 
     CHSV color(hue8, rgb_object.saturation, rgb_object.lightness);
 
-    Serial.printf("[RGB] mode=%u hue=%u(%u) sat=%u val=%u\n",
+    ECOSMART_LOGI(TAG, "mode=%u hue=%u(%u) sat=%u val=%u",
                   rgb_object.mode,
                   rgb_object.hue,
                   hue8,

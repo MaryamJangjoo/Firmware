@@ -4,6 +4,7 @@
 #include <ArduinoJson.h>
 
 #include "crypto.hpp"
+#include "Logging.h"
 
 #ifdef USE_LittleFS
 #include <LittleFS.h>
@@ -11,24 +12,26 @@
 #include <SPIFFS.h>
 #endif
 
+static const char* TAG = "CLOUD-STORAGE";
+
 bool CloudStorage::init()
 {
     if (mounted_) return true;
 
 #ifdef USE_LittleFS
     if (!LittleFS.begin(true)) {
-        Serial.println("[FS] LittleFS mount failed");
+        ECOSMART_LOGE(TAG, "LittleFS mount failed");
         return false;
     }
 #else
     if (!SPIFFS.begin(true)) {
-        Serial.println("[FS] SPIFFS mount failed");
+        ECOSMART_LOGE(TAG, "SPIFFS mount failed");
         return false;
     }
 #endif
 
     mounted_ = true;
-    Serial.println("[FS] Filesystem mounted successfully");
+    ECOSMART_LOGI(TAG, "Filesystem mounted successfully");
     listFiles();
     return true;
 }
@@ -50,7 +53,7 @@ bool CloudStorage::readFile(const String& path, String& content)
 #endif
 
     if (!file) {
-        Serial.printf("[FS] Failed to open: %s\n", path.c_str());
+        ECOSMART_LOGW(TAG, "Failed to open: %s", path.c_str());
         return false;
     }
 
@@ -70,7 +73,7 @@ bool CloudStorage::writeFile(const String& path, const String& content)
 #endif
 
     if (!file) {
-        Serial.printf("[FS] Failed to write: %s\n", path.c_str());
+        ECOSMART_LOGE(TAG, "Failed to write: %s", path.c_str());
         return false;
     }
 
@@ -78,13 +81,13 @@ bool CloudStorage::writeFile(const String& path, const String& content)
     file.close();
 
     if (written != content.length()) {
-        Serial.printf("[FS] Write error: %u/%u bytes\n",
+        ECOSMART_LOGE(TAG, "Write error: %u/%u bytes",
                       static_cast<unsigned>(written),
                       static_cast<unsigned>(content.length()));
         return false;
     }
 
-    Serial.printf("[FS] Written: %s (%u bytes)\n", path.c_str(),
+    ECOSMART_LOGI(TAG, "Written: %s (%u bytes)", path.c_str(),
                   static_cast<unsigned>(written));
     return true;
 }
@@ -93,7 +96,7 @@ void CloudStorage::listFiles()
 {
     if (!mounted_ && !init()) return;
 
-    Serial.println("[FS] Listing files:");
+    ECOSMART_LOGI(TAG, "Listing files:");
 
 #ifdef USE_LittleFS
     File root = LittleFS.open("/");
@@ -102,13 +105,13 @@ void CloudStorage::listFiles()
 #endif
 
     if (!root) {
-        Serial.println("[FS] Failed to open root");
+        ECOSMART_LOGW(TAG, "Failed to open root");
         return;
     }
 
     File file = root.openNextFile();
     while (file) {
-        Serial.printf("  - %s (%u bytes)\n", file.name(),
+        ECOSMART_LOGI(TAG, "  - %s (%u bytes)", file.name(),
                       static_cast<unsigned>(file.size()));
         file = root.openNextFile();
     }
@@ -119,30 +122,27 @@ void CloudStorage::printFileContent(const String& path)
 {
     String content;
     if (!readFile(path, content)) {
-        Serial.printf("[FS] Failed to read: %s\n", path.c_str());
+        ECOSMART_LOGW(TAG, "Failed to read: %s", path.c_str());
         return;
     }
-    Serial.printf("[FS] Content of %s:\n", path.c_str());
-    Serial.println("--- START ---");
-    Serial.println(content);
-    Serial.println("--- END ---");
+    ECOSMART_LOGI(TAG, "Content of %s:", path.c_str());
+    ECOSMART_LOGI(TAG, "--- START ---");
+    ECOSMART_LOGI(TAG, "%s", content.c_str());
+    ECOSMART_LOGI(TAG, "--- END ---");
 }
-
 
 bool CloudStorage::createDefaultUsersFile()
 {
     String existing;
     if (readFile("/users.json", existing)) {
-        Serial.println("[FS] users.json already exists");
+        ECOSMART_LOGI(TAG, "users.json already exists");
         return true;
     }
 
     String hashedPassword;
 
     if (!cryptoHashPassword("SecurePassword@20266", hashedPassword)) {
-        Serial.println(
-            "[FS] ❌ Failed to hash default password - users.json NOT created"
-        );
+        ECOSMART_LOGE(TAG, "Failed to hash default password - users.json NOT created");
         return false;
     }
 
@@ -150,7 +150,7 @@ bool CloudStorage::createDefaultUsersFile()
     JsonArray users = doc["users"].to<JsonArray>();
     JsonObject user = users.add<JsonObject>();
     user["username"] = "tes29t_operator";
-    user["passwordHash"] = hashedPassword; 
+    user["passwordHash"] = hashedPassword;
     user["publicKey"] = "-----BEGIN PUBLIC KEY-----...";
     user["role"] = "OWNER";
     user["lastLogin"] = 0;
@@ -162,10 +162,10 @@ bool CloudStorage::createDefaultUsersFile()
     serializeJson(doc, jsonContent);
 
     if (writeFile("/users.json", jsonContent)) {
-        Serial.println("[FS] ✅ users.json created (password hashed with PBKDF2)");
+        ECOSMART_LOGI(TAG, "users.json created (password hashed with PBKDF2)");
         return true;
     }
-    Serial.println("[FS] Failed to create users.json");
+    ECOSMART_LOGE(TAG, "Failed to create users.json");
     return false;
 }
 
@@ -173,7 +173,7 @@ bool CloudStorage::createDefaultSiteInfoFile()
 {
     String existing;
     if (readFile("/site_info.json", existing)) {
-        Serial.println("[FS] site_info.json already exists");
+        ECOSMART_LOGI(TAG, "site_info.json already exists");
         return true;
     }
 
@@ -189,10 +189,10 @@ bool CloudStorage::createDefaultSiteInfoFile()
     serializeJson(doc, jsonContent);
 
     if (writeFile("/site_info.json", jsonContent)) {
-        Serial.println("[FS] site_info.json created");
+        ECOSMART_LOGI(TAG, "site_info.json created");
         return true;
     }
-    Serial.println("[FS] Failed to create site_info.json");
+    ECOSMART_LOGE(TAG, "Failed to create site_info.json");
     return false;
 }
 
@@ -201,19 +201,19 @@ bool CloudStorage::loadUsers(std::vector<UserInfo>& users)
     users.clear();
     String content;
     if (!readFile("/users.json", content)) {
-        Serial.println("[FS] users.json not found");
+        ECOSMART_LOGW(TAG, "users.json not found");
         return false;
     }
 
     JsonDocument doc;
     if (deserializeJson(doc, content) != DeserializationError::Ok) {
-        Serial.println("[FS] users.json parse error");
+        ECOSMART_LOGE(TAG, "users.json parse error");
         return false;
     }
 
     JsonVariant usersVariant = doc["users"];
     if (!usersVariant.is<JsonArray>()) {
-        Serial.println("[FS] Invalid users.json format");
+        ECOSMART_LOGE(TAG, "Invalid users.json format");
         return false;
     }
 
@@ -229,7 +229,7 @@ bool CloudStorage::loadUsers(std::vector<UserInfo>& users)
         }
     }
 
-    Serial.printf("[FS] Loaded %u users\n", static_cast<unsigned>(users.size()));
+    ECOSMART_LOGI(TAG, "Loaded %u users", static_cast<unsigned>(users.size()));
     return true;
 }
 
@@ -240,7 +240,7 @@ bool CloudStorage::saveUsers(const std::vector<UserInfo>& users)
     for (const auto& user : users) {
         JsonObject obj = arr.add<JsonObject>();
         obj["username"] = user.username;
-        obj["passwordHash"] = user.passwordHash; 
+        obj["passwordHash"] = user.passwordHash;
         obj["publicKey"] = user.publicKey;
         obj["role"] = user.role;
         obj["lastLogin"] = user.lastLogin;
@@ -258,13 +258,13 @@ bool CloudStorage::loadSiteInfo(SiteInfo& info)
 {
     String content;
     if (!readFile("/site_info.json", content)) {
-        Serial.println("[FS] site_info.json not found");
+        ECOSMART_LOGW(TAG, "site_info.json not found");
         return false;
     }
 
     JsonDocument doc;
     if (deserializeJson(doc, content) != DeserializationError::Ok) {
-        Serial.println("[FS] site_info.json parse error");
+        ECOSMART_LOGE(TAG, "site_info.json parse error");
         return false;
     }
 
@@ -292,7 +292,6 @@ bool CloudStorage::saveSiteInfo(const SiteInfo& info)
     return writeFile("/site_info.json", content);
 }
 
-
 bool CloudStorage::verifyUserPassword(const String& username, const String& password)
 {
     std::vector<UserInfo> users;
@@ -301,10 +300,10 @@ bool CloudStorage::verifyUserPassword(const String& username, const String& pass
     for (const auto& user : users) {
         if (user.username == username) {
             if (cryptoVerifyPassword(password, user.passwordHash)) {
-                Serial.printf("[AUTH] User '%s' verified offline\n", username.c_str());
+                ECOSMART_LOGI(TAG, "User '%s' verified offline", username.c_str());
                 return true;
             }
-            Serial.printf("[AUTH] Invalid password for '%s'\n", username.c_str());
+            ECOSMART_LOGW(TAG, "Invalid password for '%s'", username.c_str());
             return false;
         }
     }
@@ -316,6 +315,7 @@ bool CloudStorage::loginOffline(const String& username, const String& password)
     if (username.isEmpty() || password.isEmpty()) return false;
     return verifyUserPassword(username, password);
 }
+
 size_t CloudStorage::getStorageTotalBytes()
 {
     if (!mounted_ && !init()) return 0;

@@ -1,5 +1,8 @@
 #include "AudioRegistryController.h"
 #include "audio.hpp"
+#include "Logging.h"
+
+static const char* TAG = "AUDIO";
 
 AudioRegistryController::AudioRegistryController(
     tas5805m& amp, btAudio& bta)
@@ -41,7 +44,7 @@ void AudioRegistryController::onWrite(uint16_t regAddr)
         uint8_t vol = audio_object.volume;
         if (vol > 124) vol = 124;
         tas5805m_set_volume_pct(vol);
-        Serial.printf("[AUDIO] Volume -> %u%%\n", vol);
+        ECOSMART_LOGI(TAG, "Volume -> %u%%", vol);
     }
     else if (regAddr == REG_ADD_AUDIO_BASS) {
         enableEqIfNeeded();
@@ -53,7 +56,7 @@ void AudioRegistryController::onWrite(uint16_t regAddr)
             amp_.setEqGain(TAS5805M_EQ_CHANNELS_RIGHT, band, gain_db);
         }
 
-        Serial.printf("[AUDIO] Bass -> %u (gain %d dB)\n",
+        ECOSMART_LOGI(TAG, "Bass -> %u (gain %d dB)",
                       audio_object.bass, gain_db);
     }
     else if (regAddr == REG_ADD_AUDIO_TREBLE) {
@@ -66,11 +69,11 @@ void AudioRegistryController::onWrite(uint16_t regAddr)
             amp_.setEqGain(TAS5805M_EQ_CHANNELS_RIGHT, band, gain_db);
         }
 
-        Serial.printf("[AUDIO] Treble -> %u (gain %d dB)\n",
+        ECOSMART_LOGI(TAG, "Treble -> %u (gain %d dB)",
                       audio_object.treble, gain_db);
     }
     else if (regAddr == REG_ADD_AUDIO_EQ) {
-        Serial.printf("[AUDIO] EQ -> %u\n", audio_object.eq);
+        ECOSMART_LOGI(TAG, "EQ -> %u", audio_object.eq);
     }
     else if (regAddr == REG_ADD_AUDIO_CONTROL) {
         switch (audio_object.control) {
@@ -79,13 +82,13 @@ void AudioRegistryController::onWrite(uint16_t regAddr)
         }
     }
     else if (regAddr == REG_ADD_AUDIO_MODE) {
-        Serial.printf("[AUDIO] Mode -> %u\n", audio_object.mode);
+        ECOSMART_LOGI(TAG, "Mode -> %u", audio_object.mode);
     }
     else if (regAddr == REG_ADD_AUDIO_STATION) {
-        Serial.printf("[AUDIO] Station -> %u\n", audio_object.station);
+        ECOSMART_LOGI(TAG, "Station -> %u", audio_object.station);
     }
     else if (regAddr == REG_ADD_AUDIO_SLEEP_TIMER) {
-        Serial.printf("[AUDIO] Sleep timer -> %u min\n", audio_object.sleep_timer);
+        ECOSMART_LOGI(TAG, "Sleep timer -> %u min", audio_object.sleep_timer);
     }
 }
 
@@ -97,8 +100,8 @@ void AudioRegistryController::enableEqIfNeeded()
     if (ret == ESP_OK) {
         delay(50);
         eqEnabled_ = true;
-        Serial.println("[AUDIO] EQ mode ON");
+        ECOSMART_LOGI(TAG, "EQ mode ON");
     } else {
-        Serial.printf("[AUDIO] ❌ setEqMode failed: 0x%04X\n", ret);
+        ECOSMART_LOGE(TAG, "setEqMode failed: 0x%04X", ret);
     }
 }

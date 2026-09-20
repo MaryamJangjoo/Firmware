@@ -7,20 +7,12 @@
 #include "crypto.hpp"
 #include "mybus_frame.h"
 #include "mybus_protocol_constants.h"
+#include "Logging.h"
+
+static const char* TAG = "MYBUS-SESSION";
 
 // ============================================================
 // Secure string wipe helper
-//
-// Arduino String does not expose a writable buffer, so we cannot
-// directly zero its heap storage. The safest approach is:
-//   1) Overwrite the current logical content via replace()
-//      with a fixed-length mask, then
-//   2) Reset the String to empty so the heap block is released.
-//
-// Note: the heap block may still contain stale bytes until the
-// allocator reuses it. For full protection, prefer storing
-// sensitive data in fixed-size uint8_t buffers and wiping those
-// with cryptoSecureZero().
 // ============================================================
 
 static void secureClearString(String& s)
@@ -84,12 +76,12 @@ bool MybusSession::initializeDeviceKeypair()
     }
 
     if (!cryptoInit()) {
-        Serial.println("[mYBUS] cryptoInit failed");
+        ECOSMART_LOGE(TAG, "cryptoInit failed");
         return false;
     }
 
     if (!loadDeviceKeypair(deviceKeypair_)) {
-        Serial.println("[mYBUS] Failed to load/generate device keypair");
+        ECOSMART_LOGE(TAG, "Failed to load/generate device keypair");
         return false;
     }
 
@@ -101,7 +93,7 @@ bool MybusSession::initializeDeviceKeypair()
             deviceKeypair_,
             devicePublicKeyPem_)) {
 
-        Serial.println("[mYBUS] Public key PEM export failed");
+        ECOSMART_LOGE(TAG, "Public key PEM export failed");
 
         mbedtls_ecp_keypair_free(&deviceKeypair_);
         mbedtls_ecp_keypair_init(&deviceKeypair_);
@@ -116,7 +108,7 @@ bool MybusSession::initializeDeviceKeypair()
             deviceKeypair_,
             devicePrivateKeyPem_)) {
 
-        Serial.println("[mYBUS] Private key PEM export failed");
+        ECOSMART_LOGE(TAG, "Private key PEM export failed");
 
         mbedtls_ecp_keypair_free(&deviceKeypair_);
         mbedtls_ecp_keypair_init(&deviceKeypair_);
@@ -128,7 +120,7 @@ bool MybusSession::initializeDeviceKeypair()
     if (devicePublicKeyPem_.isEmpty() ||
         devicePrivateKeyPem_.isEmpty()) {
 
-        Serial.println("[mYBUS] PEM export produced empty key");
+        ECOSMART_LOGE(TAG, "PEM export produced empty key");
 
         mbedtls_ecp_keypair_free(&deviceKeypair_);
         mbedtls_ecp_keypair_init(&deviceKeypair_);
@@ -137,7 +129,7 @@ bool MybusSession::initializeDeviceKeypair()
         return false;
     }
 
-    Serial.println("[mYBUS] Device ECDH keypair ready");
+    ECOSMART_LOGI(TAG, "Device ECDH keypair ready");
 
     return true;
 }
@@ -182,10 +174,7 @@ bool MybusSession::generateHandshakeNonce()
 
     handshakeNonce_ = createNonce();
 
-    Serial.printf(
-        "[mYBUS] Nonce generated: %s\n",
-        handshakeNonce_.c_str()
-    );
+    ECOSMART_LOGI(TAG, "Nonce generated: %s", handshakeNonce_.c_str());
 
     return !handshakeNonce_.isEmpty();
 }
@@ -238,9 +227,8 @@ bool MybusSession::createChallengeHmac(String& hmacHexOut)
     if (!sessionKeyValid_ ||
         handshakeNonce_.isEmpty()) {
 
-        Serial.println(
-            "[mYBUS] Cannot create HMAC: session invalid or nonce empty"
-        );
+        ECOSMART_LOGE(TAG,
+            "Cannot create HMAC: session invalid or nonce empty");
 
         return false;
     }
@@ -263,24 +251,17 @@ bool MybusSession::createChallengeHmac(String& hmacHexOut)
 
 bool MybusSession::computeSessionKey()
 {
-    Serial.println(
-        "[mYBUS] Computing Session Key"
-    );
+    ECOSMART_LOGI(TAG, "Computing Session Key");
 
     if (serverPublicKeyPem_.isEmpty()) {
-        Serial.println(
-            "[mYBUS] Missing server public key"
-        );
+        ECOSMART_LOGE(TAG, "Missing server public key");
         return false;
     }
 
     if (!deviceKeypairInitialized_ ||
         devicePrivateKeyPem_.isEmpty()) {
 
-        Serial.println(
-            "[mYBUS] Device keypair not initialized"
-        );
-
+        ECOSMART_LOGE(TAG, "Device keypair not initialized");
         return false;
     }
 
@@ -292,10 +273,7 @@ bool MybusSession::computeSessionKey()
             sharedSecretHex) ||
         sharedSecretHex.isEmpty()) {
 
-        Serial.println(
-            "[mYBUS] ECDH shared secret failed"
-        );
-
+        ECOSMART_LOGE(TAG, "ECDH shared secret failed");
         return false;
     }
 
@@ -313,10 +291,7 @@ bool MybusSession::computeSessionKey()
 
         secureClearString(sharedSecretHex);
 
-        Serial.println(
-            "[mYBUS] Shared secret conversion failed"
-        );
-
+        ECOSMART_LOGE(TAG, "Shared secret conversion failed");
         return false;
     }
 
@@ -361,18 +336,13 @@ bool MybusSession::computeSessionKey()
             sizeof(sessionKey_)
         );
 
-        Serial.println(
-            "[mYBUS] HKDF derivation failed"
-        );
-
+        ECOSMART_LOGE(TAG, "HKDF derivation failed");
         return false;
     }
 
     sessionKeyValid_ = true;
 
-    Serial.println(
-        "[mYBUS] Session key derived successfully"
-    );
+    ECOSMART_LOGI(TAG, "Session key derived successfully");
 
     return true;
 }
@@ -384,17 +354,12 @@ bool MybusSession::computeSessionKey()
 bool MybusSession::authenticateHandshakeSession(
     uint32_t requestNumber)
 {
-    Serial.println(
-        "[mYBUS] PHASE 2: HMAC Verification Started"
-    );
+    ECOSMART_LOGI(TAG, "PHASE 2: HMAC Verification Started");
 
     String hmac;
 
     if (!createChallengeHmac(hmac)) {
-        Serial.println(
-            "[mYBUS] Challenge HMAC creation failed"
-        );
-
+        ECOSMART_LOGE(TAG, "Challenge HMAC creation failed");
         return false;
     }
 
@@ -452,10 +417,7 @@ bool MybusSession::authenticateHandshakeSession(
     secureClearString(body);
 
     if (response.isEmpty()) {
-        Serial.println(
-            "[mYBUS] Phase 2 failed - empty response"
-        );
-
+        ECOSMART_LOGE(TAG, "Phase 2 failed - empty response");
         return false;
     }
 
@@ -467,10 +429,7 @@ bool MybusSession::authenticateHandshakeSession(
 
         secureClearString(response);
 
-        Serial.println(
-            "[mYBUS] Phase 2 JSON parse error"
-        );
-
+        ECOSMART_LOGE(TAG, "Phase 2 JSON parse error");
         return false;
     }
 
@@ -481,16 +440,11 @@ bool MybusSession::authenticateHandshakeSession(
         responseDoc["isAuthenticated"].as<bool>();
 
     if (!authenticated) {
-        Serial.println(
-            "[mYBUS] Server rejected Phase 2"
-        );
-
+        ECOSMART_LOGE(TAG, "Server rejected Phase 2");
         return false;
     }
 
-    Serial.println(
-        "[mYBUS] Phase 2 authenticated"
-    );
+    ECOSMART_LOGI(TAG, "Phase 2 authenticated");
 
     return true;
 }
@@ -502,27 +456,19 @@ bool MybusSession::authenticateHandshakeSession(
 bool MybusSession::performHandshake(
     uint32_t requestNumber)
 {
-    Serial.println(
-        "========== mYBUS v2 HANDSHAKE =========="
-    );
+    ECOSMART_LOGI(TAG, "========== mYBUS v2 HANDSHAKE ==========");
 
     if (!deviceKeypairInitialized_ &&
         !initializeDeviceKeypair()) {
 
-        Serial.println(
-            "[mYBUS] Device keypair unavailable"
-        );
-
+        ECOSMART_LOGE(TAG, "Device keypair unavailable");
         return false;
     }
 
     clear();
 
     if (!generateHandshakeNonce()) {
-        Serial.println(
-            "[mYBUS] Nonce generation failed"
-        );
-
+        ECOSMART_LOGE(TAG, "Nonce generation failed");
         return false;
     }
 
@@ -571,9 +517,7 @@ bool MybusSession::performHandshake(
         body
     );
 
-    Serial.println(
-        "[mYBUS] Sending Phase 1 (ECDH)"
-    );
+    ECOSMART_LOGI(TAG, "Sending Phase 1 (ECDH)");
 
     String response =
         transport_.sendRequest(
@@ -586,9 +530,7 @@ bool MybusSession::performHandshake(
     secureClearString(body);
 
     if (response.isEmpty()) {
-        Serial.println(
-            "[mYBUS] Phase 1 failed - empty response"
-        );
+        ECOSMART_LOGE(TAG, "Phase 1 failed - empty response");
 
         clear();
         return false;
@@ -602,9 +544,7 @@ bool MybusSession::performHandshake(
 
         secureClearString(response);
 
-        Serial.println(
-            "[mYBUS] Phase 1 JSON parse error"
-        );
+        ECOSMART_LOGE(TAG, "Phase 1 JSON parse error");
 
         clear();
         return false;
@@ -618,9 +558,7 @@ bool MybusSession::performHandshake(
     if (serverKey == nullptr ||
         strlen(serverKey) == 0) {
 
-        Serial.println(
-            "[mYBUS] Missing/empty server public key"
-        );
+        ECOSMART_LOGE(TAG, "Missing/empty server public key");
 
         clear();
         return false;
@@ -631,18 +569,14 @@ bool MybusSession::performHandshake(
     serverPublicKeyPem_ =
         String(serverKey);
 
-    Serial.println(
-        "[mYBUS] Server public key received"
-    );
+    ECOSMART_LOGI(TAG, "Server public key received");
 
     // --------------------------------------------------------
     // ECDH + HKDF
     // --------------------------------------------------------
 
     if (!computeSessionKey()) {
-        Serial.println(
-            "[mYBUS] Session key derivation failed"
-        );
+        ECOSMART_LOGE(TAG, "Session key derivation failed");
 
         clear();
         return false;
@@ -655,21 +589,14 @@ bool MybusSession::performHandshake(
     if (!authenticateHandshakeSession(
             requestNumber)) {
 
-        Serial.println(
-            "[mYBUS] Phase 2 authentication failed"
-        );
+        ECOSMART_LOGE(TAG, "Phase 2 authentication failed");
 
         clear();
         return false;
     }
 
-    Serial.println(
-        "[mYBUS] Secure session established"
-    );
-
-    Serial.println(
-        "========================================"
-    );
+    ECOSMART_LOGI(TAG, "Secure session established");
+    ECOSMART_LOGI(TAG, "========================================");
 
     return true;
 }

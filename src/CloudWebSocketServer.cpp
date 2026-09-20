@@ -14,6 +14,13 @@
 #include "LocalWsController.h"
 #include "PlaintextTokenStore.h"
 #include "crypto.hpp"
+#include "Logging.h"
+
+static const char* TAG_WS          = "WS";
+static const char* TAG_WS_FRONTEND = "WS-FRONTEND";
+static const char* TAG_PLAINTEXT   = "PLAINTEXT-MYBUS";
+static const char* TAG_HTTP        = "HTTP";
+static const char* TAG_AUTH        = "AUTH";
 
 namespace {
 class ByteWriter {
@@ -85,7 +92,6 @@ bool isPlaintextMybusFrame(const uint8_t* data, size_t len)
 
 } // namespace
 
-
 // ============================================================
 // Global POST body capture buffer
 //
@@ -98,7 +104,6 @@ bool isPlaintextMybusFrame(const uint8_t* data, size_t len)
 // ============================================================
 static String g_pendingPostBody;
 static bool   g_pendingPostBodyActive = false;
-
 
 CloudWebSocketServer::CloudWebSocketServer(
     MybusTransport& mybus,
@@ -140,13 +145,11 @@ uint32_t CloudWebSocketServer::nextRequestNumber()
     return requestNumber_;
 }
 
-
 void CloudWebSocketServer::start()
 {
     if (server_ != nullptr) return;
 
     server_ = new AsyncWebServer(80);
-
 
     // ============================================================
     // Backend channel: /ws (encrypted mYBUS)
@@ -256,17 +259,17 @@ void CloudWebSocketServer::start()
     server_->on("/", HTTP_GET, [this](AsyncWebServerRequest *request) {
         String host = request->host();
 
-        Serial.printf("[HTTP] 🔍 GET / host='%s'\n", host.c_str());
+        ECOSMART_LOGI(TAG_HTTP, "GET / host='%s'", host.c_str());
 
         if (host.indexOf("ecosmart") >= 0) {
-            Serial.println("[HTTP] → mDNS: returning IP");
+            ECOSMART_LOGI(TAG_HTTP, "mDNS: returning IP");
             request->send(200, "text/plain", WiFi.localIP().toString());
             return;
         }
 
-        Serial.println("[HTTP] → IP: serving index.html");
+        ECOSMART_LOGI(TAG_HTTP, "IP: serving index.html");
         if (!handleFileRead(request, "/index.html")) {
-            Serial.println("[HTTP] ❌ index.html not found in LittleFS");
+            ECOSMART_LOGE(TAG_HTTP, "index.html not found in LittleFS");
             request->send(404, "text/plain",
                 "index.html not found. Run: pio run -t uploadfs");
         }
@@ -347,12 +350,12 @@ void CloudWebSocketServer::start()
 
     server_->begin();
 
-    Serial.println("[WS] HTTP server started on port 80");
-    Serial.println("[WS]   GET  /             (device info / index.html)");
-    Serial.println("[WS]   GET  /info         (device status JSON)");
-    Serial.println("[WS]   POST /auth/login   (frontend auth)");
-    Serial.println("[WS] WS endpoint: /ws           (backend, encrypted)");
-    Serial.println("[WS] WS endpoint: /ws/frontend  (frontend, plaintext)");
+    ECOSMART_LOGI(TAG_WS, "HTTP server started on port 80");
+    ECOSMART_LOGI(TAG_WS, "  GET  /             (device info / index.html)");
+    ECOSMART_LOGI(TAG_WS, "  GET  /info         (device status JSON)");
+    ECOSMART_LOGI(TAG_WS, "  POST /auth/login   (frontend auth)");
+    ECOSMART_LOGI(TAG_WS, "WS endpoint: /ws           (backend, encrypted)");
+    ECOSMART_LOGI(TAG_WS, "WS endpoint: /ws/frontend  (frontend, plaintext)");
 }
 
 void CloudWebSocketServer::loop()
@@ -367,7 +370,6 @@ bool CloudWebSocketServer::isConnected() const
 {
     return connected_ && client_ != nullptr;
 }
-
 
 // ============================================================
 // Backend channel (/ws) - unchanged behavior
@@ -391,7 +393,7 @@ bool CloudWebSocketServer::sendControlFrame(
     }
 
     if (!client_->binary(wire.data(), wire.size())) {
-        Serial.println("[WS] ❌ Failed to send binary frame");
+        ECOSMART_LOGE(TAG_WS, "Failed to send binary frame");
         return false;
     }
 
@@ -415,7 +417,6 @@ void CloudWebSocketServer::sendError(
                       payload.data(), payload.size());
 }
 
-
 void CloudWebSocketServer::sendRegistryReadResponse(
     uint16_t requestNumber,
     uint16_t regAddr,
@@ -434,11 +435,10 @@ void CloudWebSocketServer::sendRegistryReadResponse(
                       respPayload.data(), respPayload.size());
 }
 
-
 void CloudWebSocketServer::requestSiteInfo()
 {
     if (!isConnected()) {
-        Serial.println("[WS] WebSocket not connected");
+        ECOSMART_LOGW(TAG_WS, "WebSocket not connected");
         return;
     }
     handleGetSiteInfo(static_cast<uint16_t>(nextRequestNumber() & 0xFFFF));
@@ -447,12 +447,11 @@ void CloudWebSocketServer::requestSiteInfo()
 void CloudWebSocketServer::requestUsersList()
 {
     if (!isConnected()) {
-        Serial.println("[WS] WebSocket not connected");
+        ECOSMART_LOGW(TAG_WS, "WebSocket not connected");
         return;
     }
     handleGetUsers(static_cast<uint16_t>(nextRequestNumber() & 0xFFFF));
 }
-
 
 // ============================================================
 // Backend channel event handler (encrypted)
@@ -469,7 +468,7 @@ void CloudWebSocketServer::onEvent(
     switch (type) {
 
         case WS_EVT_CONNECT: {
-            Serial.printf("[WS] Backend client connected: %u\n", client->id());
+            ECOSMART_LOGI(TAG_WS, "Backend client connected: %u", client->id());
 
             client_ = client;
             connected_ = true;
@@ -488,14 +487,14 @@ void CloudWebSocketServer::onEvent(
                     static_cast<uint16_t>(nextRequestNumber() & 0xFFFF),
                     payload.data(), payload.size());
             } else {
-                Serial.println("[WS] Skipping welcome: no secure session");
+                ECOSMART_LOGW(TAG_WS, "Skipping welcome: no secure session");
             }
 
             break;
         }
 
         case WS_EVT_DISCONNECT: {
-            Serial.printf("[WS] Backend client disconnected: %u\n", client->id());
+            ECOSMART_LOGI(TAG_WS, "Backend client disconnected: %u", client->id());
             if (client_ == client) {
                 client_ = nullptr;
                 connected_ = false;
@@ -510,7 +509,7 @@ void CloudWebSocketServer::onEvent(
 
             if (!info->final || info->index != 0 || info->len != len
                 || info->opcode != WS_BINARY) {
-                Serial.println("[WS] ⚠️ Ignoring fragmented/non-binary frame");
+                ECOSMART_LOGW(TAG_WS, "Ignoring fragmented/non-binary frame");
                 break;
             }
 
@@ -524,7 +523,6 @@ void CloudWebSocketServer::onEvent(
             break;
     }
 }
-
 
 // ============================================================
 // Frontend channel event handler (plaintext)
@@ -541,12 +539,12 @@ void CloudWebSocketServer::onFrontendEvent(
     switch (type) {
 
         case WS_EVT_CONNECT:
-            Serial.printf("[WS-FRONTEND] Client connected: %u\n", client->id());
+            ECOSMART_LOGI(TAG_WS_FRONTEND, "Client connected: %u", client->id());
             localWs_.onClientConnected(client);
             break;
 
         case WS_EVT_DISCONNECT:
-            Serial.printf("[WS-FRONTEND] Client disconnected: %u\n", client->id());
+            ECOSMART_LOGI(TAG_WS_FRONTEND, "Client disconnected: %u", client->id());
             localWs_.onClientDisconnected(client);
             break;
 
@@ -557,14 +555,15 @@ void CloudWebSocketServer::onFrontendEvent(
 
             if (!info->final || info->index != 0 || info->len != len
                 || info->opcode != WS_BINARY) {
-                Serial.println("[WS-FRONTEND] ⚠️ Ignoring fragmented/non-binary frame");
+                ECOSMART_LOGW(TAG_WS_FRONTEND,
+                    "Ignoring fragmented/non-binary frame");
                 break;
             }
 
             // Path 1: Local JSON frame (magic [0x4C, 0x4F])
             if (LocalWsController::isLocalFrame(data, len)) {
-                Serial.printf("[WS-FRONTEND] 📥 Local frame (%u bytes)\n",
-                              static_cast<unsigned>(len));
+                ECOSMART_LOGI(TAG_WS_FRONTEND,
+                    "Local frame (%u bytes)", static_cast<unsigned>(len));
 
                 String response;
                 const auto result = localWs_.tryHandle(client, data, len, response);
@@ -573,7 +572,8 @@ void CloudWebSocketServer::onFrontendEvent(
                     && client != nullptr
                     && !response.isEmpty()) {
                     if (!client->text(response)) {
-                        Serial.println("[WS-FRONTEND] ❌ Failed to send response");
+                        ECOSMART_LOGE(TAG_WS_FRONTEND,
+                            "Failed to send response");
                     }
                 }
                 break;
@@ -581,13 +581,14 @@ void CloudWebSocketServer::onFrontendEvent(
 
             // Path 2: Plaintext mYBUS frame (protocol=0x02, security=0x00)
             if (isPlaintextMybusFrame(data, len)) {
-                Serial.printf("[WS-FRONTEND] 📥 Plaintext mYBUS frame (%u bytes)\n",
-                              static_cast<unsigned>(len));
+                ECOSMART_LOGI(TAG_WS_FRONTEND,
+                    "Plaintext mYBUS frame (%u bytes)",
+                    static_cast<unsigned>(len));
                 handlePlaintextMybusFrame(client, data, len);
                 break;
             }
 
-            Serial.println("[WS-FRONTEND] ❌ Unknown frame type");
+            ECOSMART_LOGE(TAG_WS_FRONTEND, "Unknown frame type");
             break;
         }
 
@@ -595,7 +596,6 @@ void CloudWebSocketServer::onFrontendEvent(
             break;
     }
 }
-
 
 // ============================================================
 // Encrypted backend frame handling (unchanged)
@@ -608,11 +608,11 @@ void CloudWebSocketServer::handleBinaryMessage(void* arg, uint8_t* data, size_t 
     if (info == nullptr || data == nullptr) return;
 
     if (!info->final || info->index != 0 || info->len != len || info->opcode != WS_BINARY) {
-        Serial.println("[WS] ⚠️ Ignoring fragmented/non-binary frame");
+        ECOSMART_LOGW(TAG_WS, "Ignoring fragmented/non-binary frame");
         return;
     }
 
-    Serial.printf("[WS] 📥 Encrypted frame (%u bytes)\n", static_cast<unsigned>(len));
+    ECOSMART_LOGI(TAG_WS, "Encrypted frame (%u bytes)", static_cast<unsigned>(len));
 
     static constexpr uint8_t kAllowedIncoming[] = {
         mybus_proto::COMMAND_READ_REGISTRY,
@@ -630,7 +630,8 @@ void CloudWebSocketServer::handleBinaryMessage(void* arg, uint8_t* data, size_t 
 
     if (!mybus_.parseControlFrame(data, len, kAllowedIncoming, kAllowedIncomingCount,
                                    hdr, payload, err)) {
-        Serial.printf("[WS] ❌ Invalid control frame: %s\n", mybus_frameErrorToString(err));
+        ECOSMART_LOGE(TAG_WS, "Invalid control frame: %s",
+            mybus_frameErrorToString(err));
         return;
     }
 
@@ -656,7 +657,6 @@ void CloudWebSocketServer::handleBinaryMessage(void* arg, uint8_t* data, size_t 
     }
 }
 
-
 // ============================================================
 // Plaintext mYBUS frame handling (frontend channel)
 // ============================================================
@@ -673,16 +673,17 @@ void CloudWebSocketServer::handlePlaintextMybusFrame(
     size_t payloadLen = 0;
 
     if (!mybus_parseFrame(data, len, hdr, &payload, &payloadLen)) {
-        Serial.println("[PLAINTEXT-MYBUS] ❌ Frame parse failed (bad CRC or length)");
+        ECOSMART_LOGE(TAG_PLAINTEXT, "Frame parse failed (bad CRC or length)");
         // Can't send error because we don't have a valid header to
         // echo the command from. Best we can do is stay silent.
         return;
     }
 
-    Serial.printf("[PLAINTEXT-MYBUS] cmd=%u iface=%u zone=%u devId=%u req=%u flags=0x%02X security=0x%02X\n",
-                  hdr.command, hdr.interfaceId, hdr.zone,
-                  hdr.deviceId, hdr.requestNumber,
-                  hdr.flags, hdr.security);
+    ECOSMART_LOGI(TAG_PLAINTEXT,
+        "cmd=%u iface=%u zone=%u devId=%u req=%u flags=0x%02X security=0x%02X",
+        hdr.command, hdr.interfaceId, hdr.zone,
+        hdr.deviceId, hdr.requestNumber,
+        hdr.flags, hdr.security);
 
     dispatchPlaintextFrame(client, hdr, payload, payloadLen);
 }
@@ -694,7 +695,7 @@ void CloudWebSocketServer::dispatchPlaintextFrame(
     size_t payloadLen)
 {
     if (payloadLen < PlaintextTokenStore::TOKEN_LENGTH) {
-        Serial.println("[PLAINTEXT-MYBUS] ❌ Payload too short for token");
+        ECOSMART_LOGE(TAG_PLAINTEXT, "Payload too short for token");
         sendPlaintextError(client, hdr.command, hdr.requestNumber,
                            mybus_proto::REASON_BAD_REQUEST);
         return;
@@ -705,21 +706,21 @@ void CloudWebSocketServer::dispatchPlaintextFrame(
     const size_t framePayloadLen = payloadLen - PlaintextTokenStore::TOKEN_LENGTH;
 
     if (!tokenStore_.validate(token)) {
-        Serial.printf("[PLAINTEXT-MYBUS] ❌ Invalid token %02X%02X%02X%02X\n",
+        ECOSMART_LOGE(TAG_PLAINTEXT, "Invalid token %02X%02X%02X%02X",
                       token[0], token[1], token[2], token[3]);
         sendPlaintextError(client, hdr.command, hdr.requestNumber,
                            mybus_proto::REASON_BAD_REQUEST);
         return;
     }
 
-    Serial.printf("[PLAINTEXT-MYBUS] ✅ Token OK (%02X%02X%02X%02X)\n",
+    ECOSMART_LOGI(TAG_PLAINTEXT, "Token OK (%02X%02X%02X%02X)",
                   token[0], token[1], token[2], token[3]);
 
     switch (hdr.command) {
 
         case mybus_proto::COMMAND_WRITE_REGISTRY: {
             if (framePayloadLen < 3) {
-                Serial.println("[PLAINTEXT-MYBUS] WRITE payload too short");
+                ECOSMART_LOGW(TAG_PLAINTEXT, "WRITE payload too short");
                 sendPlaintextError(client, hdr.command, hdr.requestNumber,
                                    mybus_proto::REASON_BAD_REQUEST);
                 return;
@@ -746,16 +747,16 @@ void CloudWebSocketServer::dispatchPlaintextFrame(
                 }
             }
 
-            Serial.printf("[PLAINTEXT-MYBUS] WRITE 0x%04X = '%s'\n",
+            ECOSMART_LOGI(TAG_PLAINTEXT, "WRITE 0x%04X = '%s'",
                           regAddr, regVal.c_str());
 
             const bool handled =
                 (localWriteCallback_ && localWriteCallback_(regAddr, regVal));
 
             if (handled) {
-                Serial.println("[PLAINTEXT-MYBUS] Handled locally");
+                ECOSMART_LOGI(TAG_PLAINTEXT, "Handled locally");
             } else {
-                Serial.println("[PLAINTEXT-MYBUS] Register not found");
+                ECOSMART_LOGW(TAG_PLAINTEXT, "Register not found");
                 sendPlaintextError(client, hdr.command, hdr.requestNumber,
                                    mybus_proto::REASON_NOT_FOUND, regAddr);
                 return;
@@ -774,7 +775,7 @@ void CloudWebSocketServer::dispatchPlaintextFrame(
 
         case mybus_proto::COMMAND_READ_REGISTRY: {
             if (framePayloadLen < 2) {
-                Serial.println("[PLAINTEXT-MYBUS] READ payload too short");
+                ECOSMART_LOGW(TAG_PLAINTEXT, "READ payload too short");
                 sendPlaintextError(client, hdr.command, hdr.requestNumber,
                                    mybus_proto::REASON_BAD_REQUEST);
                 return;
@@ -783,7 +784,7 @@ void CloudWebSocketServer::dispatchPlaintextFrame(
             const uint16_t regAddr =
                 static_cast<uint16_t>(framePayload[0] | (framePayload[1] << 8));
 
-            Serial.printf("[PLAINTEXT-MYBUS] READ 0x%04X\n", regAddr);
+            ECOSMART_LOGI(TAG_PLAINTEXT, "READ 0x%04X", regAddr);
 
             RegisterRawValue rv;
             if (localReadCallback_ && localReadCallback_(regAddr, rv)) {
@@ -803,7 +804,7 @@ void CloudWebSocketServer::dispatchPlaintextFrame(
                     respPayload.data(),
                     respPayload.size());
             } else {
-                Serial.println("[PLAINTEXT-MYBUS] Register not found");
+                ECOSMART_LOGW(TAG_PLAINTEXT, "Register not found");
                 sendPlaintextError(client, hdr.command, hdr.requestNumber,
                                    mybus_proto::REASON_NOT_FOUND, regAddr);
             }
@@ -811,7 +812,7 @@ void CloudWebSocketServer::dispatchPlaintextFrame(
         }
 
         default:
-            Serial.printf("[PLAINTEXT-MYBUS] Unhandled command: %u\n", hdr.command);
+            ECOSMART_LOGW(TAG_PLAINTEXT, "Unhandled command: %u", hdr.command);
             sendPlaintextError(client, hdr.command, hdr.requestNumber,
                                mybus_proto::REASON_BAD_REQUEST);
             break;
@@ -853,16 +854,16 @@ bool CloudWebSocketServer::sendPlaintextFrame(
         hdr, payload, payloadLen, frame.data(), frame.size());
 
     if (frameLen == 0) {
-        Serial.println("[PLAINTEXT-MYBUS] ❌ Frame build failed");
+        ECOSMART_LOGE(TAG_PLAINTEXT, "Frame build failed");
         return false;
     }
 
     if (!client->binary(frame.data(), frameLen)) {
-        Serial.println("[PLAINTEXT-MYBUS] ❌ Failed to send frame");
+        ECOSMART_LOGE(TAG_PLAINTEXT, "Failed to send frame");
         return false;
     }
 
-    Serial.printf("[PLAINTEXT-MYBUS] 📤 Sent response (%u bytes)\n",
+    ECOSMART_LOGI(TAG_PLAINTEXT, "Sent response (%u bytes)",
                   static_cast<unsigned>(frameLen));
 
     return true;
@@ -884,7 +885,7 @@ bool CloudWebSocketServer::sendPlaintextError(
     payload[2] = static_cast<uint8_t>(regAddr & 0xFF);
     payload[3] = static_cast<uint8_t>((regAddr >> 8) & 0xFF);
 
-    // flags = RSP bit (0) | SF bit (2) → 0x05
+    // flags = RSP bit (0) | SF bit (2) -> 0x05
     const uint8_t flags = (1U << MYBUS_FLAG_RSP_BIT) | (1U << MYBUS_FLAG_SF_BIT);
 
     const bool ok = sendPlaintextFrame(
@@ -896,12 +897,12 @@ bool CloudWebSocketServer::sendPlaintextError(
         payload.size()
     );
 
-    Serial.printf("[PLAINTEXT-MYBUS] ⚠️ Error response: cmd=0x%02X reason=0x%02X reg=0x%04X\n",
-                  originalCommand, reason, regAddr);
+    ECOSMART_LOGW(TAG_PLAINTEXT,
+        "Error response: cmd=0x%02X reason=0x%02X reg=0x%04X",
+        originalCommand, reason, regAddr);
 
     return ok;
 }
-
 
 // ============================================================
 // HTTP /auth/login
@@ -1003,9 +1004,8 @@ void CloudWebSocketServer::handleAuthLogin(AsyncWebServerRequest* request)
     response->print(responseBuf);
     request->send(response);
 
-    Serial.printf("[AUTH] ✅ Issued token for '%s'\n", username.c_str());
+    ECOSMART_LOGI(TAG_AUTH, "Issued token for '%s'", username.c_str());
 }
-
 
 // ============================================================
 // Encrypted backend frame dispatch (unchanged)
@@ -1022,12 +1022,12 @@ void CloudWebSocketServer::handleReadRegistry(
 
     const uint16_t regAddr = static_cast<uint16_t>(payload[0] | (payload[1] << 8));
 
-    Serial.printf("[WS] GET_REGISTRY: 0x%04X\n", regAddr);
+    ECOSMART_LOGI(TAG_WS, "GET_REGISTRY: 0x%04X", regAddr);
 
     if (localReadCallback_) {
         RegisterRawValue localValue;
         if (localReadCallback_(regAddr, localValue)) {
-            Serial.printf("[WS] ✅ Local registry read: 0x%04X\n", regAddr);
+            ECOSMART_LOGI(TAG_WS, "Local registry read: 0x%04X", regAddr);
             if (localValue.isString()) {
                 const uint8_t* bytes =
                     reinterpret_cast<const uint8_t*>(localValue.stringValue.c_str());
@@ -1041,7 +1041,7 @@ void CloudWebSocketServer::handleReadRegistry(
         }
     }
 
-    Serial.printf("[WS] ℹ️ Registry 0x%04X not local, forwarding to mYBUS\n", regAddr);
+    ECOSMART_LOGI(TAG_WS, "Registry 0x%04X not local, forwarding to mYBUS", regAddr);
 
     const uint8_t busDeviceId = 1;
 
@@ -1064,7 +1064,6 @@ void CloudWebSocketServer::handleReadRegistry(
     sendRegistryReadResponse(hdr.requestNumber, regAddr, valueBytes.data(), valueBytes.size());
 }
 
-
 void CloudWebSocketServer::handleWriteRegistryFrame(
     const MyBusHeader& hdr,
     const std::vector<uint8_t>& payload)
@@ -1079,7 +1078,7 @@ void CloudWebSocketServer::handleWriteRegistryFrame(
         return;
     }
 
-    Serial.printf("[WS] 📝 WRITE_REGISTRY: 0x%04X (%u bytes)\n",
+    ECOSMART_LOGI(TAG_WS, "WRITE_REGISTRY: 0x%04X (%u bytes)",
                   regAddr, static_cast<unsigned>(valueLen));
 
     const uint8_t busDeviceId = 1;
@@ -1089,7 +1088,8 @@ void CloudWebSocketServer::handleWriteRegistryFrame(
     }
 
     if (shouldSkipMybusWriteCallback_ && shouldSkipMybusWriteCallback_(regAddr)) {
-        Serial.printf("[WS] ✅ Local register 0x%04X handled without mYBUS forwarding\n", regAddr);
+        ECOSMART_LOGI(TAG_WS,
+            "Local register 0x%04X handled without mYBUS forwarding", regAddr);
         const uint8_t flags = (1U << MYBUS_FLAG_RSP_BIT);
         sendControlFrame(mybus_proto::COMMAND_WRITE_REGISTRY, flags, hdr.requestNumber,
                           payload.data(), 2);
@@ -1103,12 +1103,12 @@ void CloudWebSocketServer::handleWriteRegistryFrame(
     const bool ok = sent && (response["success"] | false);
 
     if (ok) {
-        Serial.println("[WS] ✅ WRITE_REGISTRY successful");
+        ECOSMART_LOGI(TAG_WS, "WRITE_REGISTRY successful");
         const uint8_t flags = (1U << MYBUS_FLAG_RSP_BIT);
         sendControlFrame(mybus_proto::COMMAND_WRITE_REGISTRY, flags, hdr.requestNumber,
                           payload.data(), 2);
     } else {
-        Serial.println("[WS] ❌ WRITE_REGISTRY failed");
+        ECOSMART_LOGE(TAG_WS, "WRITE_REGISTRY failed");
         const uint8_t reason = !sent ? mybus_proto::REASON_TRANSPORT_ERROR
                                       : mybus_proto::REASON_BACKEND_ERROR;
         sendError(hdr.command, hdr.requestNumber, reason, regAddr);
@@ -1223,7 +1223,7 @@ void CloudWebSocketServer::handleNotFound(AsyncWebServerRequest* request)
         g_pendingPostBodyActive = false;
     }
 
-    Serial.printf("[HTTP] ⚠️ Not Found: %s %s\n",
+    ECOSMART_LOGW(TAG_HTTP, "Not Found: %s %s",
                   request->methodToString(),
                   request->url().c_str());
 

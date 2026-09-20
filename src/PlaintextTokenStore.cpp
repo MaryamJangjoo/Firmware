@@ -4,6 +4,9 @@
 #include <string.h>
 
 #include "crypto.hpp"
+#include "Logging.h"
+
+static const char* TAG = "TOKEN";
 
 PlaintextTokenStore::PlaintextTokenStore()
 {
@@ -20,7 +23,7 @@ bool PlaintextTokenStore::issue(
 
     uint8_t randomBytes[TOKEN_LENGTH] = {0};
     if (!cryptoRandomBytes(randomBytes, sizeof(randomBytes))) {
-        Serial.println("[TOKEN] ❌ RNG failed");
+        ECOSMART_LOGE(TAG, "RNG failed");
         return false;
     }
 
@@ -38,7 +41,7 @@ bool PlaintextTokenStore::issue(
     }
 
     if (slot == nullptr) {
-        Serial.println("[TOKEN] ❌ No free slot");
+        ECOSMART_LOGE(TAG, "No free slot");
         return false;
     }
 
@@ -48,7 +51,7 @@ bool PlaintextTokenStore::issue(
 
     memcpy(outToken, randomBytes, TOKEN_LENGTH);
 
-    Serial.printf("[TOKEN] ✅ Issued token %02X%02X%02X%02X (TTL %lu ms)\n",
+    ECOSMART_LOGI(TAG, "Issued token %02X%02X%02X%02X (TTL %lu ms)",
                   randomBytes[0], randomBytes[1],
                   randomBytes[2], randomBytes[3],
                   static_cast<unsigned long>(ttlMs));
