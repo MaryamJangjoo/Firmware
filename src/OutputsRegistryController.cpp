@@ -210,7 +210,7 @@ void OutputsRegistryController::applyToHardware()
     }
 
     digitalWrite(pinLatch_, LOW);
-    shiftOut(pinData_, pinClock_, LSBFIRST, byteLow);
-    shiftOut(pinData_, pinClock_, LSBFIRST, byteHigh);
+    shiftOut(pinData_, pinClock_, MSBFIRST, byteHigh);
+    shiftOut(pinData_, pinClock_, MSBFIRST, byteLow);
     digitalWrite(pinLatch_, HIGH);
 }

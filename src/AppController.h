@@ -8,6 +8,7 @@
 #include <FastLED.h>
 #include <ArduinoJson.h>
 #include <vector>
+#include "Logging.h"
 
 #include "CloudManager.h"
 #include "ecosmart_registeries.h"
@@ -80,15 +81,10 @@ private:
     RgbRegistryController     rgbController_;
     CurtainRegistryController curtainController_;
 
-    // Persistent storage for Cloud Connectivity registers.
     CloudRegistryStore      cloudStore_;
 
-    // Registry controller for the Cloud Connectivity module.
-    // Constructed after cloudStore_ so the reference is valid.
     CloudRegistryController cloudController_;
 
-    // Registry controllers as a base-class list, used for iteration
-    // in onLocalRegistryRead / onShouldSkipMybusWrite.
     std::vector<RegistryControllerBase*> registryControllers_;
 
     bool ledState     = false;

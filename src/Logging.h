@@ -61,7 +61,6 @@
   #define ECOSMART_LOGD(tag, fmt, ...) ESP_LOGD(tag, fmt, ##__VA_ARGS__)
   #define ECOSMART_LOGV(tag, fmt, ...) ESP_LOGV(tag, fmt, ##__VA_ARGS__)
 
-  // No-op: ARDUHAL filters at compile time via CORE_DEBUG_LEVEL.
   #define ECOSMART_LOG_SET_LEVEL(tag, level) ((void)(tag), (void)(level))
 
   #define ECOSMART_LOG_LEVEL_NONE    0

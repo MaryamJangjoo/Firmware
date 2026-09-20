@@ -11,6 +11,16 @@
 #define WIFI_STA 1
 #endif
 
+static const char* TAG        = "APP";
+static const char* TAG_WIFI   = "WIFI";
+static const char* TAG_MDNS   = "MDNS";
+static const char* TAG_CLOUD  = "CLOUD";
+static const char* TAG_AUTH   = "AUTH";
+static const char* TAG_MYBUS  = "MYBUS";
+static const char* TAG_WS     = "WS";
+static const char* TAG_BIN    = "BIN";
+static const char* TAG_AUDIO  = "AUDIO";
+
 AppController* AppController::s_instance = nullptr;
 
 AppController::AppController()
@@ -22,9 +32,6 @@ AppController::AppController()
       curtainController_(outputsController_),
       cloudController_(cloudStore_)
 {
-    // Populate the base-class list after all controllers are constructed.
-    // The Cloud controller is appended so its registers participate in
-    // the same iteration path as the others.
     registryControllers_ = {
         &audioController_,
         &rgbController_,
@@ -44,25 +51,17 @@ void AppController::begin()
 
     Serial.begin(115200);
     delay(200);
-    Serial.println("System Starting ....");
+    ECOSMART_LOGI(TAG, "System Starting ....");
 
     pinMode(PIN_I2S_PDN, OUTPUT);
     digitalWrite(PIN_I2S_PDN, HIGH);
     delay(10);
-    Serial.println("PDN pin set HIGH (TAS5805M active)");
+    ECOSMART_LOGI(TAG, "PDN pin set HIGH (TAS5805M active)");
 
     ecosmart_registery_init();
 
-    // Open the cloud registry NVS store before touching any
-    // cloud_object fields. If the namespace cannot be opened
-    // the setters become no-ops and RAM stays consistent with
-    // the (empty) NVS image.
     cloudStore_.begin();
 
-    // Seed the store from compile-time defaults on first boot.
-    // API_BASE_URL is expected to be of the form
-    // "http://<host>:<port>"; only the host portion is used
-    // here so the IP / FQDN is seeded, not the full URL.
     {
         String defaultHost = String(API_BASE_URL);
         const int schemeEnd = defaultHost.indexOf("://");
@@ -80,11 +79,6 @@ void AppController::begin()
             String(OWNER_PASSWORD));
     }
 
-    // Mirror the persisted store values into the registry
-    // process image so reads reflect NVS immediately. The
-    // password is intentionally masked here: the plaintext
-    // value lives only in the store, and a subsequent write of
-    // "****" is rejected by the controller.
     cloud_object.server_fqdn = cloudStore_.getServerFqdn();
     cloud_object.server_ip   = cloudStore_.getServerIp();
     cloud_object.server_port = cloudStore_.getServerPort();
@@ -93,17 +87,16 @@ void AppController::begin()
     cloud_object.device_id   = cloudStore_.getDeviceId();
 
     if (!connectToWiFi()) {
-        Serial.println("[ERROR] WiFi connection failed. Retrying in 5 seconds...");
+        ECOSMART_LOGE(TAG, "WiFi connection failed. Retrying in 5 seconds...");
         delay(5000);
         ESP.restart();
         return;
     }
 
-    // mDNS: ecosmart.local
     if (!MDNS.begin("ecosmart")) {
-        Serial.println("[mDNS] Failed to start");
+        ECOSMART_LOGE(TAG_MDNS, "Failed to start");
     } else {
-        Serial.println("[mDNS] Started: http://ecosmart.local");
+        ECOSMART_LOGI(TAG_MDNS, "Started: http://ecosmart.local");
         MDNS.addService("http", "tcp", 80);
         MDNS.addService("ws", "tcp", 80);
         MDNS.addServiceTxt("http", "tcp", "device", "EcoSmart");
@@ -112,23 +105,14 @@ void AppController::begin()
 
     initCloudManager();
 
-    // Bind the cloud registry controller to the freshly created
-    // CloudManager, then push the persisted config BEFORE any
-    // login attempt. Without applyStoredConfig() the device
-    // silently falls back to the compile-time API_BASE_URL on
-    // every boot and any user-configured server is lost.
     cloudController_.attachCloudManager(cloudManager);
     cloudController_.applyStoredConfig();
     cloudController_.syncDeviceIdFromCloudManager();
 
     configureMybusAddress();
 
-    Serial.println("[AUTH] Attempting to login...");
+    ECOSMART_LOGI(TAG_AUTH, "Attempting to login...");
 
-    // Prefer the persisted credentials when present, otherwise
-    // fall back to the compile-time owner defaults. The store is
-    // the source of truth for the plaintext password; the
-    // registry object only ever holds the mask.
     const bool haveStoredUsername = !cloudStore_.getUsername().isEmpty();
     const bool haveStoredPassword = !cloudStore_.getPassword().isEmpty();
 
@@ -140,39 +124,38 @@ void AppController::begin()
         cloudManager->getDeviceId());
 
     if (loginSuccess) {
-        Serial.println("[AUTH] Login successful!");
+        ECOSMART_LOGI(TAG_AUTH, "Login successful!");
     } else {
-        Serial.println("[AUTH] Login failed, trying offline...");
+        ECOSMART_LOGW(TAG_AUTH, "Login failed, trying offline...");
         if (cloudManager->loginOffline(OWNER_USERNAME, OWNER_PASSWORD)) {
-            Serial.println("[AUTH] Offline login successful!");
+            ECOSMART_LOGI(TAG_AUTH, "Offline login successful!");
         } else {
-            Serial.println("[AUTH] Offline login failed!");
+            ECOSMART_LOGE(TAG_AUTH, "Offline login failed!");
         }
     }
 
     if (cloudManager->isLoggedIn()) {
         if (cloudManager->isSecureSessionEstablished()) {
-            Serial.println("[mYBUS] Using restored session from NVS, skipping handshake");
+            ECOSMART_LOGI(TAG_MYBUS,
+                "Using restored session from NVS, skipping handshake");
         } else {
-            Serial.println("[mYBUS] Starting handshake...");
+            ECOSMART_LOGI(TAG_MYBUS, "Starting handshake...");
             if (cloudManager->performHandshake()) {
-                Serial.println("[mYBUS] Handshake successful!");
+                ECOSMART_LOGI(TAG_MYBUS, "Handshake successful!");
             } else {
-                Serial.println("[mYBUS] Handshake failed!");
+                ECOSMART_LOGE(TAG_MYBUS, "Handshake failed!");
             }
         }
     }
 
     cloudManager->startWebSocketServer();
-    Serial.println("[WS] WebSocket server started on /ws");
+    ECOSMART_LOGI(TAG_WS, "WebSocket server started on /ws");
 
     initAudioHardware();
 
-    Serial.println();
-    Serial.println("========================================");
-    Serial.println("ESP32 Ready! (Binary WS mode)");
-    Serial.println("========================================");
-    Serial.println();
+    ECOSMART_LOGI(TAG, "========================================");
+    ECOSMART_LOGI(TAG, "ESP32 Ready! (Binary WS mode)");
+    ECOSMART_LOGI(TAG, "========================================");
 }
 
 void AppController::handle()
@@ -185,17 +168,11 @@ void AppController::handle()
     handleLedState();
 }
 
-// ============================================================
-// WiFi Connection
-// ============================================================
-
 static const char* wifiStatusToString(wl_status_t status);
 
 bool AppController::connectToWiFi()
 {
-    Serial.println();
-    Serial.print("[WiFi] MAC Address: ");
-    Serial.println(WiFi.macAddress());
+    ECOSMART_LOGI(TAG_WIFI, "MAC: %s", WiFi.macAddress().c_str());
 
     WiFi.mode(WIFI_STA);
     WiFi.disconnect(true);
@@ -210,22 +187,29 @@ bool AppController::connectToWiFi()
         esp_wifi_set_country(&country);
     }
 
-    Serial.println("[WiFi] Scanning networks...");
+    ECOSMART_LOGI(TAG_WIFI, "Scanning...");
     int networksFound = WiFi.scanNetworks();
 
-    bool targetFoundOn24GHz = false;
+    bool targetFound = false;
     bool targetIsOpen = false;
 
     if (networksFound == 0) {
-        Serial.println("[WiFi] No networks found at all (radio issue?)");
+        ECOSMART_LOGW(TAG_WIFI, "No networks found (radio issue?)");
     } else {
-        Serial.printf("[WiFi] Found %d networks:\n", networksFound);
+        ECOSMART_LOGI(TAG_WIFI, "Found %d networks", networksFound);
 
         for (int i = 0; i < networksFound; i++) {
             String ssid = WiFi.SSID(i);
-            int32_t rssi = WiFi.RSSI(i);
-            wifi_auth_mode_t enc = WiFi.encryptionType(i);
-            int32_t channel = WiFi.channel(i);
+
+            if (ssid != String(WIFI_SSID)) {
+                continue;
+            }
+
+            targetFound = true;
+
+            const int32_t rssi = WiFi.RSSI(i);
+            const int32_t channel = WiFi.channel(i);
+            const wifi_auth_mode_t enc = WiFi.encryptionType(i);
 
             const char* encStr;
             switch (enc) {
@@ -240,46 +224,30 @@ bool AppController::connectToWiFi()
                 default:                        encStr = "UNKNOWN";    break;
             }
 
-            Serial.printf("  [%d] SSID='%s' RSSI=%d Channel=%d Enc=%s\n",
-                          i, ssid.c_str(), rssi, channel, encStr);
+            targetIsOpen = (enc == WIFI_AUTH_OPEN);
 
-            if (ssid == String(WIFI_SSID)) {
-                targetFoundOn24GHz = true;
-                targetIsOpen = (enc == WIFI_AUTH_OPEN);
+            ECOSMART_LOGI(TAG_WIFI,
+                "Target found: RSSI=%d Ch=%d Enc=%s",
+                rssi, channel, encStr);
 
-                Serial.printf(
-                    "[WiFi] Target SSID found (RSSI=%d, Enc=%s)\n",
-                    rssi, encStr
-                );
-
-                if (enc == WIFI_AUTH_WPA3_PSK) {
-                    Serial.println(
-                        "[WiFi] Network is WPA3-only - ESP32 may fail to connect."
-                    );
-                }
+            if (enc == WIFI_AUTH_WPA3_PSK) {
+                ECOSMART_LOGW(TAG_WIFI,
+                    "WPA3-only - ESP32 may fail to connect.");
             }
+
+            break; 
         }
 
-        if (!targetFoundOn24GHz) {
-            Serial.printf(
-                "[WiFi] Target SSID '%s' was NOT found in scan.\n",
-                WIFI_SSID
-            );
+        if (!targetFound) {
+            ECOSMART_LOGW(TAG_WIFI,
+                "Target SSID '%s' NOT found in scan.", WIFI_SSID);
         }
     }
 
     WiFi.scanDelete();
 
-    Serial.println();
-    Serial.print("[WiFi] Connecting to ");
-    Serial.println(WIFI_SSID);
-
-    const bool useOpenPath = targetIsOpen;
-    if (useOpenPath) {
-        Serial.println(
-            "[WiFi] Target network scanned as OPEN - trying without password"
-        );
-    }
+    ECOSMART_LOGI(TAG_WIFI, "Connecting to %s%s",
+                  WIFI_SSID, targetIsOpen ? " (OPEN)" : "");
 
     int attempt = 0;
     constexpr int kMaxAttempts = 3;
@@ -287,9 +255,9 @@ bool AppController::connectToWiFi()
 
     while (attempt < kMaxAttempts && !connected) {
         ++attempt;
-        Serial.printf("[WiFi] Attempt %d/%d\n", attempt, kMaxAttempts);
+        ECOSMART_LOGI(TAG_WIFI, "Attempt %d/%d", attempt, kMaxAttempts);
 
-        if (useOpenPath) {
+        if (targetIsOpen) {
             WiFi.begin(WIFI_SSID);
         } else {
             WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
@@ -302,36 +270,30 @@ bool AppController::connectToWiFi()
 
         if (WiFi.status() == WL_CONNECTED) {
             connected = true;
-            Serial.printf("[WiFi] Connected on attempt %d\n", attempt);
             break;
         }
 
-        Serial.printf("[WiFi] Attempt %d failed (status=%d)\n",
-                      attempt, static_cast<int>(WiFi.status()));
+        ECOSMART_LOGW(TAG_WIFI,
+            "Attempt %d failed (status=%d)",
+            attempt, static_cast<int>(WiFi.status()));
         WiFi.disconnect(true);
         delay(500);
     }
 
-    Serial.println();
-
     if (connected) {
-        Serial.println("[WiFi] Connected!");
-        Serial.print("[WiFi] IP: ");
-        Serial.println(WiFi.localIP());
-        Serial.printf("[WiFi] RSSI: %d dBm\n", WiFi.RSSI());
+        ECOSMART_LOGI(TAG_WIFI,
+            "Connected on attempt %d | IP=%s RSSI=%d dBm",
+            attempt,
+            WiFi.localIP().toString().c_str(),
+            WiFi.RSSI());
 
-        // NOTE: Do NOT call WiFi.setSleep(false) here. It breaks WiFi+BT
-        // coexistence and causes abort() in coex_core_enable when
-        // btAudio::begin() runs.
         WiFi.setAutoReconnect(true);
-        Serial.println("[WiFi] Auto-reconnect enabled");
         return true;
     }
 
-    Serial.printf(
-        "[WiFi] Connection failed after %d attempts. Final status=%d (%s)\n",
-        attempt, WiFi.status(), wifiStatusToString(WiFi.status())
-    );
+    ECOSMART_LOGE(TAG_WIFI,
+        "Failed after %d attempts (status=%d, %s)",
+        attempt, WiFi.status(), wifiStatusToString(WiFi.status()));
 
     return false;
 }
@@ -352,7 +314,7 @@ static const char* wifiStatusToString(wl_status_t status)
 
 void AppController::initCloudManager()
 {
-    Serial.println("[CLOUD] Initializing CloudManager...");
+    ECOSMART_LOGI(TAG_CLOUD, "Initializing CloudManager...");
     cloudManager = new CloudManager();
     cloudManager->setApiBaseUrl(API_BASE_URL);
 
@@ -369,8 +331,6 @@ void AppController::initCloudManager()
     ) {
         RawRegisterValue rv;
 
-        // Try each registry controller in order until one handles
-        // the address.
         bool handled = false;
         for (auto* ctrl : registryControllers_) {
             if (ctrl->read(regAddr, rv)) {
@@ -379,8 +339,6 @@ void AppController::initCloudManager()
             }
         }
 
-        // Fall back to the outputs controller for input registers,
-        // which are not part of the base-class candidate list.
         if (!handled) {
             handled = outputsController_.readLocal(regAddr, rv);
         }
@@ -390,10 +348,6 @@ void AppController::initCloudManager()
         }
 
         outValue.stringValue = rv.stringValue;
-
-        // Clamp the copied length to the destination buffer size to
-        // avoid reading past the source array and to avoid leaving
-        // stale bytes in the destination when byteLen < sizeof(bytes).
         outValue.byteLen = min(rv.byteLen, sizeof(outValue.bytes));
 
         memset(outValue.bytes, 0, sizeof(outValue.bytes));
@@ -438,14 +392,18 @@ void AppController::initCloudManager()
             || cloudController_.write(regAddr, value)
             || outputsController_.writeOutput(regAddr, value);
 
-        Serial.printf("[LOCAL-WS] %s 0x%04X = '%s'\n",
-                      handled ? "OK" : "FAIL",
-                      regAddr, value.c_str());
+        if (handled) {
+            ECOSMART_LOGI(TAG, "LOCAL-WS OK 0x%04X = '%s'",
+                          regAddr, value.c_str());
+        } else {
+            ECOSMART_LOGW(TAG, "LOCAL-WS FAIL 0x%04X = '%s'",
+                          regAddr, value.c_str());
+        }
 
         return handled;
     });
 
-    Serial.println("[CLOUD] CloudManager initialized successfully");
+    ECOSMART_LOGI(TAG_CLOUD, "CloudManager initialized successfully");
 }
 
 void AppController::configureMybusAddress()
@@ -468,16 +426,16 @@ void AppController::initAudioHardware()
     Wire.begin(PIN_I2C_SDA, PIN_I2C_SCL);
 
     if (amp.init() != ESP_OK) {
-        Serial.println("Failed to initialize TAS5805M");
+        ECOSMART_LOGE("TAS5805M", "Failed to initialize TAS5805M");
     } else {
         uint8_t volume = 70;
         if (tas5805m_set_volume_pct(volume) != ESP_OK) {
-            ESP_LOGE("TAS5805M", "Failed to set volume");
+            ECOSMART_LOGE("TAS5805M", "Failed to set volume");
         }
         if (tas5805m_get_volume_pct(&volume) != ESP_OK) {
-            ESP_LOGE("TAS5805M", "Failed to get volume");
+            ECOSMART_LOGE("TAS5805M", "Failed to get volume");
         } else {
-            ESP_LOGI("TAS5805M", "Current volume: %d", volume);
+            ECOSMART_LOGI("TAS5805M", "Current volume: %d", volume);
         }
     }
 
@@ -496,55 +454,16 @@ void AppController::handleWiFiReconnect()
     // The original implementation called WiFi.reconnect() every
     // WIFI_RECONNECT_ATTEMPT_INTERVAL_MS while in RECONNECTING
     // state, but this caused the ESP32 to repeatedly disconnect
-    // and reconnect even when the WiFi link was stable. The exact
-    // root cause is still under investigation.
+    // and reconnect even when the WiFi link was stable.
     //
     // For now, the ESP32 relies on the Arduino core's built-in
     // WiFi.setAutoReconnect(true) to handle reconnection at the
     // SDK level, without any application-level retry loop.
-    //
-    // To re-enable, uncomment the original implementation below.
     // ============================================================
-
-    // if (WiFi.status() == WL_CONNECTED) {
-    //     if (wifiReconnectState_ == WifiReconnectState::RECONNECTING) {
-    //         Serial.println("[WiFi] Reconnected!");
-    //         wifiReconnectState_ = WifiReconnectState::IDLE;
-    //     }
-    //     return;
-    // }
-    //
-    // const unsigned long now = millis();
-    //
-    // if (wifiReconnectState_ == WifiReconnectState::IDLE) {
-    //     Serial.println("[WiFi] Connection lost. Reconnecting...");
-    //     WiFi.reconnect();
-    //     wifiReconnectState_ = WifiReconnectState::RECONNECTING;
-    //     wifiReconnectStartMs_ = now;
-    //     wifiLastAttemptMs_ = now;
-    //     return;
-    // }
-    //
-    // if (wifiReconnectState_ == WifiReconnectState::RECONNECTING) {
-    //     if (now - wifiLastAttemptMs_ >= WIFI_RECONNECT_ATTEMPT_INTERVAL_MS) {
-    //         Serial.println("[WiFi] Retrying reconnect...");
-    //         WiFi.reconnect();
-    //         wifiLastAttemptMs_ = now;
-    //     }
-    //
-    //     if (now - wifiReconnectStartMs_ >= WIFI_RECONNECT_TIMEOUT_MS) {
-    //         Serial.println("[WiFi] Reconnect timeout, will retry on next loop pass");
-    //         wifiReconnectState_ = WifiReconnectState::IDLE;
-    //     }
-    // }
 }
 
 void AppController::handleLedState()
 {
-    // Legacy: nothing sets ledState anymore. If a future physical
-    // input toggles it, only the first LED_OUTPUT_COUNT outputs
-    // (the LEDs) should be affected - never the curtain channels
-    // at indices 14 and 15.
     if (lastLedState != ledState) {
         lastLedState = ledState;
 
@@ -555,9 +474,6 @@ void AppController::handleLedState()
     }
 }
 
-// ============================================================
-// Audio visualization
-// ============================================================
 
 void AppController::visualizeAudio(const uint8_t* data, uint32_t len)
 {
@@ -671,14 +587,14 @@ void AppController::onBinaryFrameReceived(
     const MyBusHeader& hdr,
     const std::vector<uint8_t>& payload)
 {
-    Serial.printf("[BIN] cmd=%u payloadLen=%u\n",
+    ECOSMART_LOGI(TAG_BIN, "cmd=%u payloadLen=%u",
                   hdr.command, static_cast<unsigned>(payload.size()));
 
     switch (hdr.command) {
 
         case mybus_proto::COMMAND_WRITE_REGISTRY: {
             if (payload.size() < 3) {
-                Serial.println("[BIN] WRITE payload too short");
+                ECOSMART_LOGW(TAG_BIN, "WRITE payload too short");
                 return;
             }
 
@@ -689,7 +605,7 @@ void AppController::onBinaryFrameReceived(
 
             const String regVal = rawPayloadToRegValString(regAddr, value, valueLen);
 
-            Serial.printf("[BIN] WRITE 0x%04X = '%s'\n",
+            ECOSMART_LOGI(TAG_BIN, "WRITE 0x%04X = '%s'",
                           regAddr, regVal.c_str());
 
             bool handledLocally =
@@ -700,18 +616,19 @@ void AppController::onBinaryFrameReceived(
                 outputsController_.writeOutput(regAddr, regVal);
 
             if (handledLocally) {
-                Serial.println("[BIN] Handled locally");
+                ECOSMART_LOGI(TAG_BIN, "Handled locally");
             } else {
-                Serial.println("[BIN] Not a local register - ignored");
+                ECOSMART_LOGW(TAG_BIN, "Not a local register - ignored");
             }
             break;
         }
 
         case mybus_proto::COMMAND_READ_REGISTRY:
-            Serial.printf("[BIN] READ_REGISTRY 0x%04X (handled by WS server)\n",
-                          payload.size() >= 2
-                              ? (payload[0] | (payload[1] << 8))
-                              : 0);
+            ECOSMART_LOGI(TAG_BIN,
+                "READ_REGISTRY 0x%04X (handled by WS server)",
+                payload.size() >= 2
+                    ? (payload[0] | (payload[1] << 8))
+                    : 0);
             break;
 
         case mybus_proto::COMMAND_WS_STATUS:
@@ -722,7 +639,7 @@ void AppController::onBinaryFrameReceived(
             break;
 
         default:
-            Serial.printf("[BIN] Unhandled cmd: %u\n", hdr.command);
+            ECOSMART_LOGW(TAG_BIN, "Unhandled cmd: %u", hdr.command);
             break;
     }
 }
