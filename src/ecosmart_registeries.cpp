@@ -5,6 +5,7 @@
 #include "rgb.hpp"
 #include "curtain.hpp"
 #include "cloud.hpp"
+#include "hvac.hpp"  
 
 reg_module_input_t reg_module_input;
 reg_module_output_t reg_module_output;
@@ -12,6 +13,7 @@ reg_module_audio_t reg_module_audio;
 reg_module_rgb_t reg_module_rgb;
 reg_module_curtain_t reg_module_curtain;
 reg_module_cloud_t reg_module_cloud;
+reg_module_hvac_t reg_module_hvac;
 
 void ecosmart_registery_init()
 {
@@ -189,4 +191,28 @@ void ecosmart_registery_init()
     reg_module_cloud.password.size     = 0;
     reg_module_cloud.password.isString = true;
     reg_module_cloud.password.writable = true;
+        // ---- HVAC ----
+    reg_module_hvac.temperature.address  = REG_ADD_HVAC_TEMPERATURE;
+    reg_module_hvac.temperature.datatype = reg_datatype_float;
+    reg_module_hvac.temperature.size     = sizeof(float);
+    reg_module_hvac.temperature.ref      = &hvac_object.temperature;
+    reg_module_hvac.temperature.writable = false;
+
+    reg_module_hvac.humidity.address  = REG_ADD_HVAC_HUMIDITY;
+    reg_module_hvac.humidity.datatype = reg_datatype_float;
+    reg_module_hvac.humidity.size     = sizeof(float);
+    reg_module_hvac.humidity.ref      = &hvac_object.humidity;
+    reg_module_hvac.humidity.writable = false;
+
+    reg_module_hvac.set_point.address  = REG_ADD_HVAC_SET_POINT;
+    reg_module_hvac.set_point.datatype = reg_datatype_uint8;
+    reg_module_hvac.set_point.size     = sizeof(uint8_t);
+    reg_module_hvac.set_point.ref      = &hvac_object.set_point;
+    reg_module_hvac.set_point.writable = true;
+
+    reg_module_hvac.remap_output.address  = REG_ADD_HVAC_REMAP_OUTPUT_REGISTRY;
+    reg_module_hvac.remap_output.datatype = reg_datatype_uint16;
+    reg_module_hvac.remap_output.size     = sizeof(uint16_t);
+    reg_module_hvac.remap_output.ref      = &hvac_object.remap_output;
+    reg_module_hvac.remap_output.writable = true;
 }

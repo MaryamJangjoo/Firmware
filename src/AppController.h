@@ -25,6 +25,7 @@
 #include "CurtainRegistryController.h"
 #include "CloudRegistryStore.h"
 #include "CloudRegistryController.h"
+#include "HvacRegistryController.h"
 
 #ifndef WIFI_SSID
 #define WIFI_SSID "CHANGE_ME_SSID"
@@ -46,13 +47,6 @@
 #define OWNER_PASSWORD "CHANGE_ME_PASSWORD"
 #endif
 
-// ============================================================
-// Global LED mode coordination
-//
-// When the RGB registry is written from the backend, the audio
-// visualizer must yield the LED strip to the RGB controller
-// until the RGB control timeout expires.
-// ============================================================
 
 extern bool     g_rgbControlActive;
 extern uint32_t g_lastRgbWriteMs;
@@ -84,6 +78,8 @@ private:
     static constexpr int PIN_I2S_FAULT = 34;
     static constexpr int PIN_I2S_PDN   = 27;
 
+    static constexpr int PIN_DHT11 = 14;
+
     static constexpr uint8_t MYBUS_DEVICE_ID = 1;
     static constexpr uint8_t MYBUS_ZONE_ID   = 1;
 
@@ -101,6 +97,7 @@ private:
 
     CloudRegistryStore      cloudStore_;
     CloudRegistryController cloudController_;
+    HvacRegistryController hvacController_;
 
     std::vector<RegistryControllerBase*> registryControllers_;
 

@@ -21,9 +21,6 @@ static const char* TAG_WS     = "WS";
 static const char* TAG_BIN    = "BIN";
 static const char* TAG_AUDIO  = "AUDIO";
 
-// ============================================================
-// Global LED mode coordination
-// ============================================================
 
 bool     g_rgbControlActive = false;
 uint32_t g_lastRgbWriteMs   = 0;
@@ -50,6 +47,7 @@ AppController::AppController()
         &curtainController_,
         &outputsController_,
         &cloudController_,
+        &hvacController_,
     };
 
     s_instance = this;
@@ -61,9 +59,6 @@ void AppController::begin()
     pinMode(PIN_LED_2, OUTPUT);
     outputsController_.begin();
 
-    // ============================================================
-    // FastLED initialization
-    // ============================================================
     FastLED.addLeds<WS2812B, PIN_LED_1, BRG>(leds, NUM_LEDS);
     FastLED.setBrightness(255);
     FastLED.clear(true);
@@ -84,6 +79,7 @@ void AppController::begin()
     ecosmart_registery_init();
 
     inputsController_.begin();
+    hvacController_.begin(PIN_DHT11);
 
     cloudStore_.begin();
 
@@ -190,13 +186,13 @@ void AppController::handle()
     }
 
     inputsController_.poll();
+    hvacController_.poll();
 
     handleWiFiReconnect();
     handleLedState();
 
     updateAudioMetadata();
 
-    // Drive the RGB effects (AUDIO mode animation).
     rgbController_.update();
 }
 
@@ -499,7 +495,7 @@ void AppController::handleLedState()
 
 void AppController::visualizeAudio(const uint8_t* data, uint32_t len)
 {
-    // Auto-release RGB control after timeout.
+    
     if (g_rgbControlActive &&
         (millis() - g_lastRgbWriteMs > RGB_CONTROL_TIMEOUT_MS)) {
         g_rgbControlActive = false;

@@ -7,6 +7,7 @@
 #include "rgb.hpp"
 #include "curtain.hpp"
 #include "cloud.hpp"
+#include "hvac.hpp"
 
 typedef enum
 {
@@ -85,12 +86,22 @@ typedef struct
     Registery_t password;
 } reg_module_cloud_t;
 
+typedef struct
+{
+    Registery_t temperature;
+    Registery_t humidity;
+    Registery_t set_point;
+    Registery_t remap_output;
+} reg_module_hvac_t;
+
+
 extern reg_module_input_t reg_module_input;
 extern reg_module_output_t reg_module_output;
 extern reg_module_audio_t reg_module_audio;
 extern reg_module_rgb_t reg_module_rgb;
 extern reg_module_curtain_t reg_module_curtain;
 extern reg_module_cloud_t reg_module_cloud;
+extern reg_module_hvac_t reg_module_hvac;
 
 // ---- Digital Inputs (Read-only, per EcoSmart Registries Map) ----
 static constexpr uint16_t REG_ADD_INPUT_STATE[16] = {
@@ -154,7 +165,8 @@ static constexpr uint16_t REG_ADD_RGB_LIGHTNESS = 0x8109;
 
 // ---- HVAC ----
 static constexpr uint16_t REG_ADD_HVAC_TEMPERATURE = 0x0705;
-static constexpr uint16_t REG_ADD_HVAC_SET_POINT = 0x810A;
+static constexpr uint16_t REG_ADD_HVAC_HUMIDITY    = 0x0706;
+static constexpr uint16_t REG_ADD_HVAC_SET_POINT   = 0x810A;
 static constexpr uint16_t REG_ADD_HVAC_REMAP_OUTPUT_REGISTRY = 0x8224;
 
 // ---- FUNCTIONS ----
