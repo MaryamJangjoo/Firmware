@@ -38,9 +38,6 @@ typedef struct
 typedef struct
 {
     Registery_t state[INPUTS_NUMBER];
-    Registery_t mode[INPUTS_NUMBER];
-    Registery_t enabled[INPUTS_NUMBER];
-    Registery_t event_count[INPUTS_NUMBER];
 } reg_module_input_t;
 
 typedef struct
@@ -95,22 +92,10 @@ extern reg_module_rgb_t reg_module_rgb;
 extern reg_module_curtain_t reg_module_curtain;
 extern reg_module_cloud_t reg_module_cloud;
 
-// ---- Digital Inputs (State: Read/Write, Mode/Enabled: Read/Write, EventCount: Read-only) ----
+// ---- Digital Inputs (Read-only, per EcoSmart Registries Map) ----
 static constexpr uint16_t REG_ADD_INPUT_STATE[16] = {
     0x0000, 0x0001, 0x0002, 0x0003, 0x0004, 0x0005, 0x0006, 0x0007,
     0x0008, 0x0009, 0x000A, 0x000B, 0x000C, 0x000D, 0x000E, 0x000F};
-
-static constexpr uint16_t REG_ADD_INPUT_MODE[16] = {
-    0x0010, 0x0011, 0x0012, 0x0013, 0x0014, 0x0015, 0x0016, 0x0017,
-    0x0018, 0x0019, 0x001A, 0x001B, 0x001C, 0x001D, 0x001E, 0x001F};
-
-static constexpr uint16_t REG_ADD_INPUT_ENABLED[16] = {
-    0x0020, 0x0021, 0x0022, 0x0023, 0x0024, 0x0025, 0x0026, 0x0027,
-    0x0028, 0x0029, 0x002A, 0x002B, 0x002C, 0x002D, 0x002E, 0x002F};
-
-static constexpr uint16_t REG_ADD_INPUT_EVENT_COUNT[16] = {
-    0x0030, 0x0031, 0x0032, 0x0033, 0x0034, 0x0035, 0x0036, 0x0037,
-    0x0038, 0x0039, 0x003A, 0x003B, 0x003C, 0x003D, 0x003E, 0x003F};
 
 // ---- Digital Outputs ----
 static constexpr uint16_t REG_ADD_OUTPUT_STATE[16] = {

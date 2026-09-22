@@ -37,7 +37,10 @@ public:
 
         if (entry->isString) {
             outValue.stringValue = *static_cast<String*>(entry->ref);
-            outValue.byteLen = 0;
+            // byteLen must reflect the actual string length so that
+            // the plaintext WS path can pack the value into the
+            // response payload.
+            outValue.byteLen = outValue.stringValue.length();
             return true;
         }
 

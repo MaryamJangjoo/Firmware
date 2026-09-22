@@ -788,11 +788,31 @@ void CloudWebSocketServer::dispatchPlaintextFrame(
 
             RegisterRawValue rv;
             if (localReadCallback_ && localReadCallback_(regAddr, rv)) {
-                std::vector<uint8_t> respPayload(2 + rv.byteLen);
-                respPayload[0] = static_cast<uint8_t>(regAddr & 0xFF);
-                respPayload[1] = static_cast<uint8_t>((regAddr >> 8) & 0xFF);
-                if (rv.byteLen > 0) {
-                    memcpy(respPayload.data() + 2, rv.bytes, rv.byteLen);
+                // Response payload format:
+                //   [addrLow][addrHigh][value bytes...]
+                //
+                // For string registers, the value bytes are the raw
+                // UTF-8 content of the string. For numeric registers,
+                // byteLen tells us how many bytes to copy from the
+                // fixed-size buffer.
+                std::vector<uint8_t> respPayload;
+
+                if (rv.isString()) {
+                    respPayload.resize(2 + rv.stringValue.length());
+                    respPayload[0] = static_cast<uint8_t>(regAddr & 0xFF);
+                    respPayload[1] = static_cast<uint8_t>((regAddr >> 8) & 0xFF);
+                    if (rv.stringValue.length() > 0) {
+                        memcpy(respPayload.data() + 2,
+                               rv.stringValue.c_str(),
+                               rv.stringValue.length());
+                    }
+                } else {
+                    respPayload.resize(2 + rv.byteLen);
+                    respPayload[0] = static_cast<uint8_t>(regAddr & 0xFF);
+                    respPayload[1] = static_cast<uint8_t>((regAddr >> 8) & 0xFF);
+                    if (rv.byteLen > 0) {
+                        memcpy(respPayload.data() + 2, rv.bytes, rv.byteLen);
+                    }
                 }
 
                 const uint8_t flags = (1U << MYBUS_FLAG_RSP_BIT);

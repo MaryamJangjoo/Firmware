@@ -15,36 +15,14 @@ reg_module_cloud_t reg_module_cloud;
 
 void ecosmart_registery_init()
 {
-    // ---- Digital Inputs ----
-    // state:      bool, R/W (write supports LATCHED reset)
-    // mode:       u8,   R/W (0=MOMENTARY, 1=TOGGLE, 2=PULSE, 3=LATCHED)
-    // enabled:    u8,   R/W (0=disabled, 1=enabled)
-    // eventCount: u16,  R   (incremented by the controller)
+    
     for (size_t i = 0; i < INPUTS_NUMBER; i++)
     {
         reg_module_input.state[i].address  = REG_ADD_INPUT_STATE[i];
         reg_module_input.state[i].datatype = reg_datatype_bit;
         reg_module_input.state[i].size     = sizeof(inputs_value[i]);
         reg_module_input.state[i].ref      = &inputs_value[i];
-        reg_module_input.state[i].writable = true;
-
-        reg_module_input.mode[i].address  = REG_ADD_INPUT_MODE[i];
-        reg_module_input.mode[i].datatype = reg_datatype_uint8;
-        reg_module_input.mode[i].size     = sizeof(uint8_t);
-        reg_module_input.mode[i].ref      = &inputs_mode_value[i];
-        reg_module_input.mode[i].writable = true;
-
-        reg_module_input.enabled[i].address  = REG_ADD_INPUT_ENABLED[i];
-        reg_module_input.enabled[i].datatype = reg_datatype_uint8;
-        reg_module_input.enabled[i].size     = sizeof(uint8_t);
-        reg_module_input.enabled[i].ref      = &inputs_enabled_value[i];
-        reg_module_input.enabled[i].writable = true;
-
-        reg_module_input.event_count[i].address  = REG_ADD_INPUT_EVENT_COUNT[i];
-        reg_module_input.event_count[i].datatype = reg_datatype_uint16;
-        reg_module_input.event_count[i].size     = sizeof(uint16_t);
-        reg_module_input.event_count[i].ref      = &inputs_event_count_value[i];
-        reg_module_input.event_count[i].writable = false;
+        reg_module_input.state[i].writable = false;
     }
 
     // ---- Digital Outputs ----

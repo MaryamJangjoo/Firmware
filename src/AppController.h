@@ -10,6 +10,9 @@
 #include <vector>
 #include "Logging.h"
 
+#include "audio.hpp"
+#include "cloud.hpp"
+
 #include "CloudManager.h"
 #include "ecosmart_registeries.h"
 #include "mybus_frame.h"
@@ -43,6 +46,17 @@
 #define OWNER_PASSWORD "CHANGE_ME_PASSWORD"
 #endif
 
+// ============================================================
+// Global LED mode coordination
+//
+// When the RGB registry is written from the backend, the audio
+// visualizer must yield the LED strip to the RGB controller
+// until the RGB control timeout expires.
+// ============================================================
+
+extern bool     g_rgbControlActive;
+extern uint32_t g_lastRgbWriteMs;
+
 class AppController {
 public:
     AppController();
@@ -54,7 +68,7 @@ private:
 
     static constexpr int PIN_LED_1 = 33;
     static constexpr int PIN_LED_2 = 32;
-    static constexpr int NUM_LEDS  = 30;
+    static constexpr int NUM_LEDS = 16;
 
     static constexpr int PIN_I2C_SDA = 21;
     static constexpr int PIN_I2C_SCL = 22;
@@ -73,6 +87,8 @@ private:
     static constexpr uint8_t MYBUS_DEVICE_ID = 1;
     static constexpr uint8_t MYBUS_ZONE_ID   = 1;
 
+    static constexpr uint32_t META_POLL_INTERVAL_MS = 5000;
+
     tas5805m amp;
     btAudio  bta;
     CRGB     leds[NUM_LEDS];
@@ -84,7 +100,6 @@ private:
     CurtainRegistryController curtainController_;
 
     CloudRegistryStore      cloudStore_;
-
     CloudRegistryController cloudController_;
 
     std::vector<RegistryControllerBase*> registryControllers_;
@@ -106,6 +121,8 @@ private:
     static constexpr unsigned long WIFI_RECONNECT_ATTEMPT_INTERVAL_MS = 500;
     static constexpr unsigned long WIFI_RECONNECT_TIMEOUT_MS = 10000;
 
+    uint32_t lastMetaPollMs_ = 0;
+
     bool connectToWiFi();
     void initCloudManager();
     void initAudioHardware();
@@ -117,6 +134,8 @@ private:
     void visualizeAudio(const uint8_t* data, uint32_t len);
     void onBtData(const uint8_t* data, uint32_t len);
     static void btDataTrampoline(const uint8_t* data, uint32_t len);
+
+    void updateAudioMetadata();
 
     void onBinaryFrameReceived(
         const MyBusHeader& hdr,

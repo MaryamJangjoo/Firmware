@@ -21,6 +21,15 @@ static const char* TAG_WS     = "WS";
 static const char* TAG_BIN    = "BIN";
 static const char* TAG_AUDIO  = "AUDIO";
 
+// ============================================================
+// Global LED mode coordination
+// ============================================================
+
+bool     g_rgbControlActive = false;
+uint32_t g_lastRgbWriteMs   = 0;
+
+static constexpr uint32_t RGB_CONTROL_TIMEOUT_MS = 10000;
+
 AppController* AppController::s_instance = nullptr;
 
 AppController::AppController()
@@ -32,9 +41,6 @@ AppController::AppController()
       curtainController_(outputsController_),
       cloudController_(cloudStore_)
 {
-    // The inputs controller needs a late binding to the outputs
-    // controller so that the master channel can drive every
-    // output when it transitions.
     inputsController_.attachOutputs(&outputsController_);
 
     registryControllers_ = {
@@ -55,6 +61,17 @@ void AppController::begin()
     pinMode(PIN_LED_2, OUTPUT);
     outputsController_.begin();
 
+    // ============================================================
+    // FastLED initialization
+    // ============================================================
+    FastLED.addLeds<WS2812B, PIN_LED_1, BRG>(leds, NUM_LEDS);
+    FastLED.setBrightness(255);
+    FastLED.clear(true);
+    ECOSMART_LOGI(TAG, "FastLED initialized: %d LEDs on GPIO %d",
+                  NUM_LEDS, PIN_LED_1);
+
+    rgbController_.loadFromNvs();
+
     Serial.begin(115200);
     delay(200);
     ECOSMART_LOGI(TAG, "System Starting ....");
@@ -66,9 +83,6 @@ void AppController::begin()
 
     ecosmart_registery_init();
 
-    // Configure the digital inputs after the registry has been
-    // initialized, so that the initial GPIO read uses the
-    // correct pull mode for each channel.
     inputsController_.begin();
 
     cloudStore_.begin();
@@ -175,13 +189,15 @@ void AppController::handle()
         cloudManager->loopWebSocketServer();
     }
 
-    // Scan the physical inputs on every loop iteration. The
-    // controller throttles itself internally using
-    // INPUT_POLL_INTERVAL_MS.
     inputsController_.poll();
 
     handleWiFiReconnect();
     handleLedState();
+
+    updateAudioMetadata();
+
+    // Drive the RGB effects (AUDIO mode animation).
+    rgbController_.update();
 }
 
 static const char* wifiStatusToString(wl_status_t status);
@@ -465,18 +481,8 @@ void AppController::initAudioHardware()
 
 void AppController::handleWiFiReconnect()
 {
-    // ============================================================
-    // DISABLED: WiFi reconnect logic is currently disabled.
-    //
-    // The original implementation called WiFi.reconnect() every
-    // WIFI_RECONNECT_ATTEMPT_INTERVAL_MS while in RECONNECTING
-    // state, but this caused the ESP32 to repeatedly disconnect
-    // and reconnect even when the WiFi link was stable.
-    //
-    // For now, the ESP32 relies on the Arduino core's built-in
-    // WiFi.setAutoReconnect(true) to handle reconnection at the
-    // SDK level, without any application-level retry loop.
-    // ============================================================
+    // WiFi reconnect logic is handled by the Arduino core's
+    // built-in WiFi.setAutoReconnect(true).
 }
 
 void AppController::handleLedState()
@@ -493,6 +499,21 @@ void AppController::handleLedState()
 
 void AppController::visualizeAudio(const uint8_t* data, uint32_t len)
 {
+    // Auto-release RGB control after timeout.
+    if (g_rgbControlActive &&
+        (millis() - g_lastRgbWriteMs > RGB_CONTROL_TIMEOUT_MS)) {
+        g_rgbControlActive = false;
+        ECOSMART_LOGI(TAG, "RGB control released, resuming audio visualizer");
+    }
+
+    if (g_rgbControlActive) {
+        return;
+    }
+
+    if (rgb_object.mode == static_cast<uint8_t>(RgbMode::AUDIO)) {
+        return;
+    }
+
     int16_t* samples = (int16_t*)data;
     int peak = 0;
     for (uint32_t i = 0; i < len / 2; i++) {
@@ -516,6 +537,11 @@ void AppController::onBtData(const uint8_t* data, uint32_t len)
 {
     size_t written;
     i2s_write(I2S_NUM_0, data, len, &written, portMAX_DELAY);
+
+    rgbController_.feedAudio(
+        reinterpret_cast<const int16_t*>(data),
+        len / 2);
+
     visualizeAudio(data, len);
 }
 
@@ -526,9 +552,26 @@ void AppController::btDataTrampoline(const uint8_t* data, uint32_t len)
     }
 }
 
-// ============================================================
-// rawPayloadToRegValString - convert raw bytes to String
-// ============================================================
+void AppController::updateAudioMetadata()
+{
+    const uint32_t now = millis();
+    if (now - lastMetaPollMs_ < META_POLL_INTERVAL_MS) {
+        return;
+    }
+    lastMetaPollMs_ = now;
+
+    bta.updateMeta();
+
+    if (!bta.title.isEmpty() && bta.title != audio_object.title) {
+        audio_object.title = bta.title;
+        ECOSMART_LOGI(TAG_AUDIO, "Title -> %s", audio_object.title.c_str());
+    }
+
+    if (!bta.artist.isEmpty() && bta.artist != audio_object.artist) {
+        audio_object.artist = bta.artist;
+        ECOSMART_LOGI(TAG_AUDIO, "Artist -> %s", audio_object.artist.c_str());
+    }
+}
 
 String AppController::rawPayloadToRegValString(
     uint16_t regAddr,
@@ -623,6 +666,11 @@ void AppController::onBinaryFrameReceived(
 
             ECOSMART_LOGI(TAG_BIN, "WRITE 0x%04X = '%s'",
                           regAddr, regVal.c_str());
+
+            if ((regAddr >= 0x8107 && regAddr <= 0x8109) || regAddr == 0x8223) {
+                g_rgbControlActive = true;
+                g_lastRgbWriteMs = millis();
+            }
 
             bool handledLocally =
                 inputsController_.write(regAddr, regVal)
